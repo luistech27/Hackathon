@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# PlatformIO
+.pio/
