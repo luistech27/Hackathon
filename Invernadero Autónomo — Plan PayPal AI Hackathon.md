@@ -1,15 +1,24 @@
 # Invernadero Autónomo — Plan PayPal AI Hackathon
 
-Oct 27, 2026 · @Luhotekk
+Oct 27, 2026 · @Luhotekk · actualizado 28 oct 2026 (enfoque empresarial)
 
 ## Resumen
 
-Un invernadero con ESP32 que no solo se cuida solo: también se reabastece solo. Un agente IA detecta que se acaba el fertilizante o el agua de riego, decide qué comprar y a qué proveedor, y paga con PayPal sin pasarse del presupuesto que fijó el dueño.
+Un agente de compras para invernaderos comerciales. Sensores con ESP32 vigilan los insumos de varios invernaderos; un agente IA (Claude) predice cuándo se acaban, arma pedidos consolidados al mejor proveedor y paga con PayPal, respetando el presupuesto de cada invernadero y la cadena de aprobaciones de la empresa.
 
-- **Problema:** pequeños productores se quedan sin insumos en el peor momento y pierden cosecha o tiempo yendo a comprar.
-- **Para quién:** agricultores pequeños y medianos con invernaderos, empezando por Santo Domingo, Ecuador.
+- **Problema:** en un invernadero grande, quedarse sin un insumo detiene la producción, y las compras se hacen tarde, desordenadas y sin control de quién aprobó qué.
+- **Para quién:** empresas con invernaderos comerciales o industriales (varios invernaderos, varios insumos, un equipo con distintos roles), empezando por Ecuador.
 - **Premios objetivo:** Best Use of Agentic Commerce, Best Demo Delivery, Best Use of PayPal + AI, Best Use of Render. Sin descartar el top 3.
-- **Base existente:** proyecto de invernadero con ESP32 (app + dashboard web) que ya está en marcha. Las reglas permiten proyectos existentes si hay avance real durante el hackathon.
+- **Avance real en el hackathon:** el proyecto anterior (`../Invernadero`) solo tenía diseño; todo el código se escribe durante el hackathon.
+
+## Estado (28 oct)
+
+- [x] Repo público con LICENSE MIT: https://github.com/luistech27/Hackathon
+- [x] Lógica de predicción, elección de proveedor y reglas de presupuesto, con TDD (48 pruebas, 100% de cobertura)
+- [x] PayPal Vault probado en Sandbox: método guardado y cobro de $1.00 COMPLETED sin el dueño presente
+- [x] Firmware del ESP32 (balanza HX711 y ultrasónico) que compila para ESP32, S3 y C6
+- [ ] Probar y calibrar el firmware en el hardware real
+- [ ] Créditos de Render: el portal dio "Origin not allowed"; se escribió a devrel+credits@render.com
 
 ## Requisitos de entrega
 
@@ -27,77 +36,127 @@ Criterios de los jueces: implementación técnica, diseño de producto completo,
 
 ## Arquitectura
 
-&#91;embedded content: arquitectura · 7 componentes\]
+1. **ESP32 por punto de almacenamiento** (cada tanque, bodega o silo), o el modo simulación: manda niveles a `POST /api/readings`.
+2. **Backend Node + TypeScript en Render:** API, roles, reglas y órdenes de compra.
+3. **Base de datos Postgres en Render** (con los créditos del hackathon).
+4. **Agente con Claude:** corre cada pocos minutos (evaluar Render Workflows) y propone pedidos consolidados con su razonamiento.
+5. **Reglas en código** (`server/src/domain`): presupuesto, matriz de aprobación y anti-fraccionamiento. Claude propone, el código decide.
+6. **PayPal Sandbox:** Vault para pagar sin el aprobador presente y Orders API para cada compra.
+7. **Dashboard web por rol:** niveles por invernadero, bandeja de aprobaciones, recepción de pedidos, historial y exportación.
 
-El ESP32 (o el modo simulación) manda lecturas al backend en Render; el agente con Claude decide y paga en PayPal Sandbox; el dashboard muestra todo y recibe las aprobaciones. Hardware nuevo: celda de carga HX711 y sensor ultrasónico, sumados a los sensores que ya tiene el invernadero.
+Modelo de datos: Empresa (moneda) → Invernaderos (presupuesto mensual, encargado) → Insumos (unidad, dispositivo, consumo) · Proveedores y catálogo · Usuarios (rol, invernadero) · Órdenes de compra · Registro de auditoría.
 
-## Flujo del agente y presupuesto
+## Roles y aprobaciones
 
-El agente compra solo por debajo del límite y pide aprobación por encima; nunca supera el presupuesto mensual.
+Basado en cómo trabajan las áreas de compras: quien pide no aprueba, el monto decide quién aprueba, y todo queda registrado.
 
-1. **Lee:** niveles actuales (balanza de fertilizante, tanque) e historial de consumo.
-2. **Predice:** días restantes de cada insumo según el ritmo de consumo y el clima del invernadero.
-3. **Decide:** si quedan menos días que el tiempo de entrega del proveedor + margen, prepara un pedido.
-4. **Elige proveedor:** compara precio, tiempo de entrega y cantidad mínima en el catálogo (la tienda de los papás puede ser un proveedor).
-5. **Revisa reglas:**
-   - Pedido ≤ monto máximo por pedido y cabe en el presupuesto del mes → paga solo.
-   - Pedido mayor → manda solicitud de aprobación a la app con su razonamiento.
-6. **Paga:** orden en PayPal con el método guardado.
-7. **Registra:** guarda la decisión, el razonamiento en una frase y el ID de la orden en el historial visible del dashboard.
+| Rol | Qué hace en el sistema |
+| --- | --- |
+| **Operador** (técnico) | Ve niveles y alertas de su invernadero; **confirma la recepción** de los pedidos |
+| **Encargado de invernadero** | Aprueba pedidos de *su* invernadero hasta su límite |
+| **Compras** | Maneja proveedores, catálogo y precios; **no aprueba pagos** |
+| **Gerente** | Fija presupuestos, límites y modo del agente; aprueba lo que pasa el límite del encargado |
 
-Reglas configurables por el dueño: presupuesto mensual, máximo por pedido, proveedores permitidos y modo (automático / siempre pedir aprobación).
+Matriz de aprobación (montos de ejemplo, configurables por el gerente):
+
+| Pedido | Quién decide |
+| --- | --- |
+| Hasta $100 y dentro del presupuesto | El agente paga solo |
+| De $100 a $500 | Encargado de ese invernadero (o gerente) |
+| Más de $500 | Gerente |
+| Pasa el presupuesto del mes | Nadie: se rechaza; solo el gerente puede subir el presupuesto |
+
+Reglas de control:
+
+- **Nadie aprueba fuera de su alcance:** el encargado solo su invernadero y hasta su límite; Compras nunca aprueba pagos.
+- **Anti-fraccionamiento:** para la matriz cuenta la suma de pedidos al mismo proveedor en los últimos 7 días, así el agente no puede partir un pedido grande para pagarlo solo.
+- **Recheque al aprobar:** al aprobar se vuelve a revisar el presupuesto con lo gastado en ese momento.
+- **Auditoría:** cada acción guarda quién, qué, cuándo y el razonamiento del agente.
+
+## Flujo del agente
+
+1. **Lee:** niveles actuales de cada insumo en cada invernadero e historial de consumo.
+2. **Predice:** días restantes según el ritmo de consumo.
+3. **Decide:** si quedan menos días que la entrega del proveedor + margen, el insumo necesita pedido.
+4. **Consolida:** agrupa los insumos que necesitan pedido por proveedor y por invernadero.
+5. **Elige proveedor:** el más barato que llegue a tiempo; si ninguno llega, el más rápido.
+6. **Pasa las reglas:** presupuesto, matriz de aprobación y anti-fraccionamiento. El monto se calcula desde el catálogo, nunca desde lo que diga la IA, y lo gastado se reserva en la misma transacción.
+7. **Paga o pide aprobación:** si está bajo el límite paga con PayPal (Vault); si no, la orden va a la bandeja del encargado o del gerente con el razonamiento.
+8. **Registra:** número de orden de compra, PayPal order ID, decisión y razonamiento en una frase.
+
+## Contabilidad liviana
+
+Versión simple de la conciliación de 3 documentos (three-way match) que usan las empresas:
+
+1. **Orden de compra** con número propio (`OC-2026-0001`): invernadero, proveedor, ítems, cantidades, precios y total.
+2. **Comprobante de pago:** la orden de PayPal (ID y estado).
+3. **Recepción:** el operador confirma si llegó completo o cuánto faltó; si falta algo, la orden queda marcada para revisión.
+
+Cada invernadero es un **centro de costo**: el dashboard muestra lo gastado frente al presupuesto y exporta un CSV por mes y por invernadero para el contador.
+
+**Moneda:** una por empresa (USD por defecto, o cualquier otra que acepte PayPal). No se mezclan monedas.
 
 ## Integración PayPal Sandbox
 
-La pieza clave es el Vault: el dueño aprueba su cuenta PayPal una vez y luego el agente puede cobrar sin que esté presente.
+Probado el 28 oct: el flujo de Vault funciona con la cuenta Sandbox de la app.
 
-1. Crear cuenta en [PayPal Developer](https://developer.paypal.com) y dos cuentas Sandbox: negocio (proveedor) y personal (dueño del invernadero).
-2. **Guardar método de pago:** setup token con `usage_type: MERCHANT` → el dueño aprueba → convertirlo en payment token y guardarlo en la base de datos. [Guía de PayPal](https://developer.paypal.com/api/payment-tokens/save-without-purchase/paypal)
-3. **Comprar sin el dueño presente:** Orders API v2 con `payment_source.paypal.vault_id` = el token guardado, luego capture.
-4. **Compras que necesitan aprobación:** orden normal con botón PayPal en la app; el dueño aprueba y se captura.
-5. Guardar cada `order_id` y su estado para mostrarlo en el historial.
-
-Riesgo a validar el día 8: que el flujo de Vault funcione en Sandbox con la cuenta usada. Plan B: todas las compras con aprobación de un toque (sigue siendo agéntico: el agente arma y propone el pedido).
+1. **Guardar método de pago (una vez, el gerente):** setup token con `usage_type: MERCHANT` → aprobación → payment token guardado en la base de datos. [Guía de PayPal](https://developer.paypal.com/api/payment-tokens/save-without-purchase/paypal)
+2. **Compra automática:** Orders API v2 con `payment_source.paypal.vault_id`; la orden vuelve `COMPLETED` directamente.
+3. **Compra aprobada por una persona:** el aprobador aprueba en el dashboard y el backend cobra con el mismo `vault_id`.
+4. Guardar cada `order_id` y su estado junto a la orden de compra.
+5. Revisar el PayPal Agent Toolkit / MCP server por si suma para "Best Use of PayPal + AI", siempre detrás de las reglas de presupuesto.
 
 ## Modo simulación para jueces
 
-Los jueces no tienen el ESP32, así que el dashboard hospedado necesita un modo simulación que use el mismo backend y el mismo agente.
+Los jueces no tienen el ESP32, así que el dashboard hospedado usa el mismo backend y el mismo agente con datos simulados.
 
-- Interruptor "Hardware real / Simulación" en el dashboard.
-- Sliders para bajar el nivel de fertilizante y agua, y un botón "acelerar tiempo" para simular días de consumo.
-- Botón "Restablecer demo" que limpia historial y presupuesto.
-- Credenciales de una cuenta Sandbox de prueba en el README para que el juez apruebe pagos.
+- **Empresa demo con 3 invernaderos:** uno recibe datos del ESP32 real y dos son simulados.
+- Sliders para bajar niveles y un botón "acelerar tiempo" para simular días de consumo.
+- Botón "Restablecer demo" que limpia historial, órdenes y presupuestos.
+- **4 usuarios de prueba, uno por rol,** y una cuenta Sandbox de PayPal en el README.
 - El agente y PayPal funcionan igual en ambos modos: solo cambia de dónde vienen los datos.
+
+## Hardware
+
+- Un ESP32 (normal, S3 o C6) por punto de almacenamiento, todos con el mismo firmware (`firmware/Invernadero`).
+- Balanza HX711 para insumos sólidos y ultrasónico para tanques; calibración por Monitor Serie.
+- Pendiente: que el nombre de cada insumo (por ejemplo `npk-bodega-1`) se configure por dispositivo en `secrets.h`.
+- A futuro: sensores industriales (radar, 4-20 mA, balanzas de plataforma) mandando a la misma API.
 
 ## Cronograma
 
-Cinco fases en 16 días; la entrega queda lista el 11 de noviembre y el 12 es solo margen.
+Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo margen.
 
-**27 oct (hoy):** inscribirse en Devpost, crear cuenta PayPal Developer y cuentas Sandbox, crear el repo con LICENSE.
+**28–30 oct · Hardware y base del backend**
 
-**28–30 oct · Hardware y datos**
+- [ ] Conectar y calibrar balanza y ultrasónico en el ESP32 real (tú)
+- [ ] Nombre de insumo configurable en el firmware
+- [ ] Backend en Render con Postgres: empresas, invernaderos, insumos, lecturas (`POST /api/readings` con clave de dispositivo)
 
-- [ ] Celda de carga HX711 bajo el envase de fertilizante, calibrada en gramos
-- [ ] Ultrasónico en el tanque, calibrado en litros
-- [ ] ESP32 envía lecturas al backend cada pocos minutos
+**31 oct – 3 nov · Agente, roles y reglas**
 
-**31 oct – 3 nov · Backend y agente**
+- [ ] Login con los 4 roles y permisos revisados en el servidor
+- [ ] Matriz de aprobación, anti-fraccionamiento y presupuesto por invernadero (TDD)
+- [ ] Catálogo de proveedores de prueba (lo maneja Compras)
+- [ ] Agente con Claude: predicción, consolidación por proveedor, elección y razonamiento
 
-- [ ] Backend en Render con base de datos (lecturas, catálogo, reglas, historial)
-- [ ] Catálogo de proveedores de prueba con precios y tiempos de entrega
-- [ ] Agente con Claude: predicción, elección de proveedor y reglas de presupuesto
+**4–6 nov · PayPal y órdenes de compra**
 
-**4–7 nov · PayPal**
+- [ ] Guardar método de pago (Vault) desde el dashboard del gerente
+- [ ] Compra automática con `vault_id` y compra tras aprobación
+- [ ] Órdenes de compra numeradas, recepción por el operador y registro de auditoría
 
-- [ ] Flujo de Vault (guardar método de pago)
-- [ ] Compra automática con `vault_id`
-- [ ] Compra con aprobación para pedidos grandes
+**7–9 nov · Dashboard y simulación**
 
-**8–10 nov · Dashboard y simulación**
+- [ ] Vista por invernadero: niveles, días restantes, presupuesto usado
+- [ ] Bandeja de aprobaciones por rol, recepción e historial con razonamiento
+- [ ] Exportación CSV por invernadero y mes
+- [ ] Modo simulación con 3 invernaderos
 
-- [ ] Dashboard: niveles, días restantes, decisiones del agente, historial de órdenes, presupuesto usado
-- [ ] Modo simulación
-- [ ] README con instrucciones y cuenta Sandbox de prueba
+**10 nov · Pruebas y README**
+
+- [ ] Pruebas E2E del flujo completo (Playwright)
+- [ ] README en inglés con instrucciones, usuarios de prueba y cuenta Sandbox
 
 **11 nov · Video y entrega**
 
@@ -108,31 +167,40 @@ Cinco fases en 16 días; la entrega queda lista el 11 de noviembre y el 12 es so
 
 ## Guion del video (máx. 3 min)
 
-El video tiene que mostrar el ciclo completo con el hardware real: de envase casi vacío a orden pagada.
-
 | Tiempo | Qué se ve |
 | --- | --- |
-| 0:00–0:20 | El problema: productor sin fertilizante en plena temporada |
-| 0:20–0:45 | El invernadero real: ESP32, balanza, tanque, dashboard en vivo |
-| 0:45–1:00 | El dueño fija presupuesto y aprueba PayPal una sola vez |
-| 1:00–1:45 | Se retira fertilizante de la balanza; el agente predice días restantes, elige proveedor y paga solo |
-| 1:45–2:15 | Pedido grande: el agente pide aprobación, el dueño aprueba en la app |
-| 2:15–2:40 | Historial con el razonamiento del agente y las órdenes de PayPal |
-| 2:40–3:00 | Impacto y cierre: para quién es y qué sigue |
+| 0:00–0:20 | El problema: empresa con varios invernaderos, insumos que se acaban y compras sin control |
+| 0:20–0:45 | Hardware real (ESP32, balanza, tanque) y dashboard con los 3 invernaderos |
+| 0:45–1:00 | El gerente fija presupuestos y límites, y aprueba PayPal una sola vez |
+| 1:00–1:40 | Se retira fertilizante de la balanza; el agente predice, consolida el pedido y paga solo |
+| 1:40–2:10 | Pedido grande: pasa el límite del encargado y el gerente lo aprueba en la app |
+| 2:10–2:30 | El operador confirma la recepción; historial con OC, ID de PayPal y razonamiento; CSV |
+| 2:30–3:00 | Impacto y lo que sigue |
 
 Usar música libre de derechos o ninguna. Narración en inglés o subtítulos en inglés.
+
+## Fuera de alcance (lo que sigue)
+
+- Integración con un ERP (por ejemplo Odoo, que tiene API de compras e inventario)
+- Escalamiento automático si nadie aprueba a tiempo
+- Reclamos en PayPal (Disputes) cuando un pedido llega incompleto
+- Proveedores en monedas distintas con conversión
+- Sensores industriales y app Android
 
 ## Checklist final y riesgos
 
 - [ ] Repo público con LICENSE visible y README en inglés
 - [ ] URL del demo hospedado funcionando en modo simulación
+- [ ] Usuarios de prueba por rol y cuenta Sandbox en el README
 - [ ] Video público en YouTube, menos de 3 min
 - [ ] Descripción en Devpost: problema, funciones, IA usada y cómo
 - [ ] Sin claves secretas en el repo (variables de entorno en Render)
 
 | Riesgo | Plan B |
 | --- | --- |
-| Vault no funciona en Sandbox | Todas las compras con aprobación de un toque |
+| Vault no funciona en Sandbox | Resuelto: probado el 28 oct |
+| Alcance grande (roles + contabilidad) | Recortar en este orden: CSV → anti-fraccionamiento → rol Compras (lo absorbe el gerente) |
+| Créditos de Render no llegan | Plan gratis mientras; base de datos pagada solo si hace falta |
 | Celda de carga inestable | Usar solo el ultrasónico del tanque |
 | Render en plan gratis se duerme | Abrir la URL antes de grabar y avisar en el README |
-| Se acaba el tiempo | Recortar la app Android; dashboard web basta |
+| Se acaba el tiempo | Dashboard web basta; recortar según el orden de arriba |
