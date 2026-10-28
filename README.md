@@ -22,7 +22,8 @@ The model proposes, the code decides. Every purchase the agent suggests goes thr
 - [ ] ESP32 firmware for fertilizer and water levels (`firmware/Invernadero`): written, not yet tested on hardware
 - [x] Backend base: data model (company, greenhouses, devices, supplies, readings) and `POST /api/readings` with per-device keys
 - [x] Login with four roles; permissions checked on the server, every route requires a session unless marked public
-- [ ] Deploy on Render, approval matrix, Claude agent, PayPal integration, dashboard with simulation mode
+- [x] Deployed on Render at https://invernadero-api-jn3j.onrender.com (server and Postgres from `render.yaml`)
+- [ ] Approval matrix, Claude agent, PayPal integration, dashboard with simulation mode
 
 ## Firmware
 

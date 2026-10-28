@@ -16,7 +16,7 @@ services:
       - key: NODE_VERSION
         value: '24' # runs the TypeScript sources directly; package.json allows any newer major
       - key: TRUSTED_PROXY_HOPS
-        value: '1' # proxies Render puts in front; check `forwardedFor` in the request logs after deploy
+        value: '2' # Cloudflare, then Render's proxy: seen as "client, cloudflare" in the `forwardedFor` log field
       - key: DATABASE_URL
         fromDatabase:
           name: invernadero-db
