@@ -30,6 +30,7 @@ databases:
   - name: invernadero-db
     region: virginia # must match the service to use the private address
     plan: 0.1c-256mb # free databases are deleted after 30 days, before judging ends
+    diskSizeGB: 1 # readings take a few MB a month; the 15 GB default costs $4.50/month more. Can grow, never shrink
     postgresMajorVersion: '18' # same major version as PGlite in local runs and tests
     databaseName: invernadero
     user: invernadero
