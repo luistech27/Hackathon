@@ -36,8 +36,23 @@ const DEMO_USERS = [
   { email: 'gerente@agroandes.test', name: 'Marta Gerente', role: 'manager', inRealGreenhouse: false, limitCents: 0 }
 ]
 
-// Names only for now; purchasing will manage their catalog of prices.
 const DEMO_SUPPLIERS = ['AgroInsumos Andinos', 'Fertilizantes del Valle', 'Riego y Agua Express']
+
+// Same names and units as the supplies above, which is how the seed links each supply to its product.
+const DEMO_PRODUCTS = [
+  { name: 'Fertilizante NPK 15-15-15', unit: 'g' },
+  { name: 'Nitrato de calcio', unit: 'g' },
+  { name: 'Agua de riego', unit: 'L' }
+]
+
+// A fast, pricier supplier and a slow, cheaper one, so the agent has a real choice to explain.
+const DEMO_OFFERS = [
+  { supplier: 'AgroInsumos Andinos', product: 'Fertilizante NPK 15-15-15', packSize: 25_000, packPriceCents: 3_200, minPacks: 1, leadTimeDays: 2 },
+  { supplier: 'Fertilizantes del Valle', product: 'Fertilizante NPK 15-15-15', packSize: 50_000, packPriceCents: 5_400, minPacks: 2, leadTimeDays: 6 },
+  { supplier: 'AgroInsumos Andinos', product: 'Nitrato de calcio', packSize: 25_000, packPriceCents: 2_900, minPacks: 1, leadTimeDays: 2 },
+  { supplier: 'Fertilizantes del Valle', product: 'Nitrato de calcio', packSize: 25_000, packPriceCents: 2_400, minPacks: 2, leadTimeDays: 6 },
+  { supplier: 'Riego y Agua Express', product: 'Agua de riego', packSize: 1_000, packPriceCents: 1_500, minPacks: 1, leadTimeDays: 1 }
+]
 
 export interface DemoSecrets {
   deviceKey: string
@@ -56,7 +71,7 @@ export async function seedDemo(db: Db, { deviceKey, demoPassword }: DemoSecrets)
     await tx.query('UPDATE devices SET key_hash = $1 WHERE name = $2', [hashDeviceKey(deviceKey), DEMO_DEVICE_NAME])
     const demo = await findDemo(tx)
     await upsertDemoUsers(tx, demo, passwordHash)
-    await upsertDemoSuppliers(tx, demo.company_id)
+    await upsertDemoCatalog(tx, demo.company_id)
   })
 }
 
@@ -98,11 +113,50 @@ async function upsertDemoUsers(tx: Queryable, demo: DemoRefs, passwordHash: stri
   }
 }
 
-async function upsertDemoSuppliers(tx: Queryable, companyId: number): Promise<void> {
+// Products are added when missing and linked to the supplies. Suppliers and offers only go in while the
+// company has no offers, so whatever purchasing renames, reprices or deactivates survives restarts.
+async function upsertDemoCatalog(tx: Queryable, companyId: number): Promise<void> {
   await tx.query(
-    `INSERT INTO suppliers (company_id, name) SELECT $1, unnest($2::text[])
+    `INSERT INTO products (company_id, name, unit) SELECT $1, * FROM unnest($2::text[], $3::text[])
      ON CONFLICT (company_id, name) DO NOTHING`,
+    [companyId, DEMO_PRODUCTS.map((p) => p.name), DEMO_PRODUCTS.map((p) => p.unit)]
+  )
+  await tx.query(
+    `UPDATE supplies s SET product_id = p.id
+     FROM greenhouses g, products p
+     WHERE s.product_id IS NULL AND g.id = s.greenhouse_id AND g.company_id = $1
+       AND p.company_id = $1 AND p.name = s.name AND p.unit = s.unit`,
+    [companyId]
+  )
+  const existing = await tx.query('SELECT 1 FROM offers WHERE company_id = $1 LIMIT 1', [companyId])
+  if (existing.rows.length > 0) return
+  await tx.query(
+    `INSERT INTO suppliers (company_id, name, approved_at) SELECT $1, unnest($2::text[]), now()
+     ON CONFLICT DO NOTHING`,
     [companyId, DEMO_SUPPLIERS]
+  )
+  // Demo suppliers created before approvals existed are approved here too.
+  await tx.query(
+    'UPDATE suppliers SET approved_at = now() WHERE company_id = $1 AND name = ANY($2) AND approved_at IS NULL',
+    [companyId, DEMO_SUPPLIERS]
+  )
+  await tx.query(
+    `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, min_packs, lead_time_days)
+     SELECT $1, s.id, p.id, o.pack_size, o.pack_price_cents, o.min_packs, o.lead_time_days
+     FROM unnest($2::text[], $3::text[], $4::float8[], $5::int[], $6::int[], $7::int[]) WITH ORDINALITY
+       AS o(supplier, product, pack_size, pack_price_cents, min_packs, lead_time_days, position)
+     JOIN suppliers s ON s.company_id = $1 AND s.name = o.supplier
+     JOIN products p ON p.company_id = $1 AND p.name = o.product
+     ORDER BY o.position`,
+    [
+      companyId,
+      DEMO_OFFERS.map((o) => o.supplier),
+      DEMO_OFFERS.map((o) => o.product),
+      DEMO_OFFERS.map((o) => o.packSize),
+      DEMO_OFFERS.map((o) => o.packPriceCents),
+      DEMO_OFFERS.map((o) => o.minPacks),
+      DEMO_OFFERS.map((o) => o.leadTimeDays)
+    ]
   )
 }
 

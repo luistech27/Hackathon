@@ -1,6 +1,8 @@
+import { recordAudit } from '../audit/audit.ts'
 import type { Db, Queryable } from '../db/client.ts'
 import { decideApproval, fitsBudget, type AgentMode, type ApprovalDecision, type Approver } from '../domain/approval.ts'
 import { canApproveOrder, canViewAllGreenhouses, canViewGreenhouse, type Actor } from '../domain/permissions.ts'
+import { assertItemRequests, loadItems, priceItems, saveItems, type ItemRequest, type OrderItem } from './items.ts'
 
 export type OrderStatus = 'pending_approval' | 'approved' | 'rejected'
 export const ORDER_STATUSES = ['pending_approval', 'approved', 'rejected'] as const satisfies readonly OrderStatus[]
@@ -8,8 +10,8 @@ export const ORDER_STATUSES = ['pending_approval', 'approved', 'rejected'] as co
 export interface NewOrder {
   companyId: number
   greenhouseId: number
-  supplierId: number
-  totalCents: number // computed by the caller from the catalog, never taken from what the model says
+  supplierId: number // one supplier per order: what the agent consolidates
+  items: readonly ItemRequest[] // offers and packs only: the price always comes from the catalog
   reasoning: string // the agent's one-sentence explanation
   requestedBy: number | null // user id; null for the agent
 }
@@ -31,7 +33,11 @@ export interface Order {
   decidedAt: Date | null
 }
 
-export interface OrderView extends Order {
+export interface CreatedOrder extends Order {
+  items: OrderItem[]
+}
+
+export interface OrderView extends CreatedOrder {
   greenhouseName: string
   supplierName: string
   requestedByName: string | null // null: the agent
@@ -39,7 +45,7 @@ export interface OrderView extends Order {
   canDecide: boolean // whether the user asking may approve or reject it now
 }
 
-export type DecideError = 'not_found' | 'forbidden' | 'not_pending' | 'over_budget'
+export type DecideError = 'not_found' | 'forbidden' | 'not_pending' | 'over_budget' | 'unavailable'
 export type DecideResult = { ok: true; order: Order } | { ok: false; error: DecideError }
 
 interface OrderRow {
@@ -67,10 +73,11 @@ const MAX_REASONING_LENGTH = 500 // the model's text is shown to people: keep it
 
 // Runs the approval matrix and saves the order with its verdict, in one transaction with the greenhouse
 // locked: two orders made at the same time cannot both take the last of the budget.
-export async function createOrder(db: Db, order: NewOrder): Promise<Order> {
+export async function createOrder(db: Db, order: NewOrder): Promise<CreatedOrder> {
   if (order.reasoning.length > MAX_REASONING_LENGTH) {
     throw new RangeError(`reasoning must be at most ${MAX_REASONING_LENGTH} characters`)
   }
+  assertItemRequests(order.items)
   return db.transaction(async (tx) => {
     const greenhouse = await tx.query<{ monthly_budget_cents: number }>(
       'SELECT monthly_budget_cents FROM greenhouses WHERE id = $1 AND company_id = $2 FOR UPDATE',
@@ -84,15 +91,19 @@ export async function createOrder(db: Db, order: NewOrder): Promise<Order> {
       [order.companyId]
     )
     const settings = firstRow(rows)
-    const supplier = await tx.query('SELECT 1 FROM suppliers WHERE id = $1 AND company_id = $2', [
-      order.supplierId,
-      order.companyId
-    ])
-    if (supplier.rows.length === 0) throw new Error(`Supplier ${order.supplierId} not found in company ${order.companyId}`)
+    // Only suppliers a manager approved, and still active. Share-locked like the offers below.
+    const supplier = await tx.query(
+      'SELECT 1 FROM suppliers WHERE id = $1 AND company_id = $2 AND active AND approved_at IS NOT NULL FOR SHARE',
+      [order.supplierId, order.companyId]
+    )
+    if (supplier.rows.length === 0) {
+      throw new Error(`Supplier ${order.supplierId} is not an active, approved supplier of company ${order.companyId}`)
+    }
+    const { items, totalCents } = await priceItems(tx, order.companyId, order.supplierId, order.items)
 
     const decision = decideApproval(
       {
-        totalCents: order.totalCents,
+        totalCents,
         spentThisMonthCents: await spentInMonth(tx, order.greenhouseId, settings.timezone, null, null),
         sameSupplierLast7DaysCents: await sameSupplierLast7Days(tx, order.greenhouseId, order.supplierId)
       },
@@ -103,7 +114,7 @@ export async function createOrder(db: Db, order: NewOrder): Promise<Order> {
         greenhouseManagerLimitCents: await greenhouseManagerLimit(tx, order.greenhouseId, order.requestedBy)
       }
     )
-    const verdict = toVerdict(decision, order.totalCents)
+    const verdict = toVerdict(decision, totalCents)
     const inserted = await tx.query<OrderRow>(
       `INSERT INTO orders AS o (company_id, greenhouse_id, supplier_id, total_cents, approval_amount_cents, status,
          required_approver, rule_reason, reasoning, requested_by, decided_at)
@@ -113,7 +124,7 @@ export async function createOrder(db: Db, order: NewOrder): Promise<Order> {
         order.companyId,
         order.greenhouseId,
         order.supplierId,
-        order.totalCents,
+        totalCents,
         verdict.approvalAmountCents,
         verdict.status,
         verdict.requiredApprover,
@@ -122,7 +133,18 @@ export async function createOrder(db: Db, order: NewOrder): Promise<Order> {
         order.requestedBy
       ]
     )
-    return toOrder(firstRow(inserted.rows))
+    const created = toOrder(firstRow(inserted.rows))
+    await saveItems(tx, created.id, items)
+    await recordAudit(tx, {
+      companyId: created.companyId,
+      userId: created.requestedBy,
+      action: 'order_created',
+      entity: 'order',
+      entityId: created.id,
+      before: null,
+      after: { status: created.status, ruleReason: created.ruleReason, totalCents, reasoning: created.reasoning }
+    })
+    return { ...created, items }
   })
 }
 
@@ -157,10 +179,15 @@ export async function listOrders(db: Queryable, actor: Actor, status?: OrderStat
      LIMIT ${LIST_LIMIT}`,
     [actor.companyId, seesAll ? null : actor.greenhouseId, status ?? null]
   )
+  const items = await loadItems(
+    db,
+    rows.map((row) => row.id)
+  )
   return rows.map((row) => {
     const order = toOrder(row)
     return {
       ...order,
+      items: items.get(order.id) ?? [],
       greenhouseName: row.greenhouse_name,
       supplierName: row.supplier_name,
       requestedByName: row.requested_by_name,
@@ -197,6 +224,8 @@ async function decideOrder(
       // Checked again now: the manager may have lowered the budget since the order was made.
       const spent = await spentInMonth(tx, order.greenhouseId, row.timezone, order.createdAt, order.id)
       if (!fitsBudget(order.totalCents, spent, row.monthly_budget_cents)) return failed('over_budget')
+      // Purchasing may have deactivated the supplier or an offer since: never approve paying for those.
+      if (!(await stillAvailable(tx, order))) return failed('unavailable')
     }
 
     const updated = await tx.query<OrderRow>(
@@ -206,7 +235,17 @@ async function decideOrder(
       [order.id, outcome, actor.id]
     )
     const decided = updated.rows[0]
-    return decided ? { ok: true, order: toOrder(decided) } : failed('not_pending')
+    if (!decided) return failed('not_pending')
+    await recordAudit(tx, {
+      companyId: order.companyId,
+      userId: actor.id,
+      action: outcome === 'approved' ? 'order_approved' : 'order_rejected',
+      entity: 'order',
+      entityId: order.id,
+      before: { status: order.status },
+      after: { status: decided.status }
+    })
+    return { ok: true, order: toOrder(decided) }
   })
 }
 
@@ -242,6 +281,17 @@ export async function spentThisMonthByGreenhouse(db: Queryable, companyId: numbe
     [companyId]
   )
   return new Map(rows.map((row) => [row.greenhouse_id, Number(row.cents)]))
+}
+
+async function stillAvailable(db: Queryable, order: Order): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM suppliers s WHERE s.id = $1 AND s.active AND s.approved_at IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM order_items oi JOIN offers o ON o.id = oi.offer_id WHERE oi.order_id = $2 AND NOT o.active
+       )`,
+    [order.supplierId, order.id]
+  )
+  return rows.length > 0
 }
 
 async function sameSupplierLast7Days(db: Queryable, greenhouseId: number, supplierId: number): Promise<number> {

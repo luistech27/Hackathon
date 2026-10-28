@@ -64,3 +64,13 @@ export function canManageCatalog(actor: Actor, companyId: number): boolean {
 export function canManageBudgets(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }
+
+// Purchasing creates suppliers, but only a manager lets the agent buy from one: otherwise purchasing
+// could add a fresh supplier with no order history and send it small orders that pay themselves.
+export function canApproveSuppliers(actor: Actor, companyId: number): boolean {
+  return sameCompany(actor, companyId) && actor.role === 'manager'
+}
+
+export function canViewAudit(actor: Actor, companyId: number): boolean {
+  return sameCompany(actor, companyId) && actor.role === 'manager'
+}

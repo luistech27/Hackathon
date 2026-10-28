@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
 import { createOrder, type NewOrder } from '../orders/orders.ts'
-import { loginAs, resetDemo } from '../testing.ts'
+import { addDollarOffers, dollarItems, loginAs, resetDemo } from '../testing.ts'
 
 // Demo users: 1 operador (greenhouse 1), 2 encargado (greenhouse 1, $500), 3 compras, 4 gerente.
 const OPERATOR = 'operador@agroandes.test'
@@ -23,8 +23,11 @@ afterAll(async () => {
   await db.close()
 })
 
+let dollarOffers: Map<number, number>
+
 beforeEach(async () => {
   await resetDemo(db)
+  dollarOffers = await addDollarOffers(db)
   app = await buildApp(db)
 })
 
@@ -32,12 +35,13 @@ afterEach(async () => {
   await app.close()
 })
 
+// An order of exactly totalCents, bought at $1 a pack from the supplier.
 const newOrder = (totalCents: number, rest: Partial<NewOrder> = {}) =>
   createOrder(db, {
     companyId: 1,
     greenhouseId: 1,
-    supplierId: 1,
-    totalCents,
+    supplierId: rest.supplierId ?? 1,
+    items: dollarItems(dollarOffers, rest.supplierId ?? 1, totalCents),
     reasoning: 'Fertilizer runs out in 4 days.',
     requestedBy: null,
     ...rest
@@ -100,8 +104,14 @@ describe('POST /api/orders/:id/approve', () => {
   it("hides another company's orders", async () => {
     await db.query(`INSERT INTO companies (name) VALUES ('Other company')`)
     await db.query(`INSERT INTO greenhouses (company_id, name, monthly_budget_cents) VALUES (2, 'Theirs', 100000)`)
-    await db.query(`INSERT INTO suppliers (company_id, name) VALUES (2, 'Their supplier')`)
-    const theirs = await newOrder(30_000, { companyId: 2, greenhouseId: 4, supplierId: 4 })
+    await db.query(`INSERT INTO suppliers (company_id, name, approved_at) VALUES (2, 'Their supplier', now())`)
+    await db.query(`INSERT INTO products (company_id, name, unit) VALUES (2, 'Their product', 'g')`)
+    const offer = await db.query<{ id: number }>(
+      `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, lead_time_days)
+       VALUES (2, 4, 4, 1, 30000, 1) RETURNING id`
+    )
+    const items = [{ offerId: offer.rows[0]?.id ?? 0, packs: 1 }]
+    const theirs = await newOrder(30_000, { companyId: 2, greenhouseId: 4, supplierId: 4, items })
 
     expect((await decide(MANAGER, theirs.id, 'approve')).statusCode).toBe(404)
   })
@@ -125,6 +135,20 @@ describe('POST /api/orders/:id/approve', () => {
     expect(res.statusCode).toBe(409)
     expect(res.json().error).toMatch(/budget/)
     expect((await decide(MANAGER, order.id, 'reject')).statusCode).toBe(200)
+  })
+
+  it('refuses to approve once purchasing deactivated the supplier or the offer, but it can still be rejected', async () => {
+    const order = await newOrder(30_000)
+    await db.query('UPDATE suppliers SET active = false WHERE id = 1')
+
+    const res = await decide(GREENHOUSE_MANAGER, order.id, 'approve')
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/no longer/)
+
+    await db.query('UPDATE suppliers SET active = true WHERE id = 1')
+    await db.query('UPDATE offers SET active = false WHERE id = $1', [dollarOffers.get(1)])
+    expect((await decide(GREENHOUSE_MANAGER, order.id, 'approve')).statusCode).toBe(409)
+    expect((await decide(GREENHOUSE_MANAGER, order.id, 'reject')).statusCode).toBe(200)
   })
 
   it.each(['abc', '0', '-1', '1.5', '99999999999'])('answers 400 for the order id %s', async (id) => {

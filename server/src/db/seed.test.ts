@@ -54,14 +54,67 @@ describe('seedDemo', () => {
     expect(rows).toHaveLength(4)
   })
 
-  it('adds the demo suppliers once, also to a database seeded before suppliers existed', async () => {
+  it('adds the demo catalog once, also to a database seeded before it existed', async () => {
+    await db.query('DELETE FROM offers')
+    await db.query('UPDATE supplies SET product_id = NULL')
+    await db.query('DELETE FROM products')
     await db.query('DELETE FROM suppliers')
 
     await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
     await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
 
-    const { rows } = await db.query('SELECT id FROM suppliers')
-    expect(rows).toHaveLength(3)
+    expect((await db.query('SELECT id FROM suppliers')).rows).toHaveLength(3)
+    expect((await db.query('SELECT id FROM products')).rows).toHaveLength(3)
+    expect((await db.query('SELECT id FROM offers')).rows).toHaveLength(5)
+  })
+
+  it('approves the demo suppliers, so the agent can buy from them from the start', async () => {
+    const { rows } = await db.query('SELECT id FROM suppliers WHERE approved_at IS NULL')
+
+    expect(rows).toHaveLength(0)
+  })
+
+  it('does not bring back a demo supplier that purchasing renamed', async () => {
+    await db.query(`UPDATE suppliers SET name = 'AgroInsumos Andinos S.A.' WHERE name = 'AgroInsumos Andinos'`)
+
+    await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
+
+    const { rows } = await db.query(`SELECT name FROM suppliers WHERE name LIKE 'AgroInsumos%'`)
+    expect(rows).toEqual([{ name: 'AgroInsumos Andinos S.A.' }])
+  })
+
+  it('links every greenhouse supply to its product, so the agent can find who sells it', async () => {
+    const { rows } = await db.query('SELECT id FROM supplies WHERE product_id IS NULL')
+
+    expect(rows).toHaveLength(0)
+  })
+
+  it('stocks the catalog with a fast and a cheap option for each fertilizer', async () => {
+    const { rows } = await db.query<{ product: string; offers: number }>(
+      `SELECT p.name AS product, COUNT(*)::int AS offers FROM offers o JOIN products p ON p.id = o.product_id
+       GROUP BY p.name ORDER BY p.name`
+    )
+
+    expect(rows).toEqual([
+      { product: 'Agua de riego', offers: 1 },
+      { product: 'Fertilizante NPK 15-15-15', offers: 2 },
+      { product: 'Nitrato de calcio', offers: 2 }
+    ])
+  })
+
+  it("keeps purchasing's price changes and deactivated offers on restart", async () => {
+    const ids = (await db.query<{ id: number }>('SELECT id FROM offers ORDER BY id LIMIT 2')).rows.map((r) => r.id)
+    await db.query('UPDATE offers SET pack_price_cents = 9999 WHERE id = $1', [ids[0]])
+    await db.query('UPDATE offers SET active = false WHERE id = $1', [ids[1]])
+
+    await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
+
+    const { rows } = await db.query('SELECT pack_price_cents, active FROM offers WHERE id = ANY($1) ORDER BY id', [ids])
+    expect(rows).toEqual([
+      expect.objectContaining({ pack_price_cents: 9_999 }),
+      expect.objectContaining({ active: false })
+    ])
+    expect((await db.query('SELECT id FROM offers')).rows).toHaveLength(5)
   })
 
   it('starts the company with a $100 auto-pay limit and the agent in auto mode', async () => {

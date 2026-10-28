@@ -20,7 +20,8 @@ const DECIDE_ERRORS: Record<DecideError, { status: number; message: string }> = 
   not_found: { status: 404, message: 'Order not found' },
   forbidden: { status: 403, message: 'You cannot decide on this order' },
   not_pending: { status: 409, message: 'This order was already decided' },
-  over_budget: { status: 409, message: "Approving it would go over the greenhouse's monthly budget" }
+  over_budget: { status: 409, message: "Approving it would go over the greenhouse's monthly budget" },
+  unavailable: { status: 409, message: 'The supplier or one of its offers is no longer available' }
 }
 
 // The approval inbox. Orders are created by the agent on the server, never through this API.

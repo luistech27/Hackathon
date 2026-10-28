@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { auditedUpdate } from '../audit/audit.ts'
 import { sessionUser } from '../auth/session.ts'
-import type { Queryable } from '../db/client.ts'
+import type { Db } from '../db/client.ts'
 import { AGENT_MODES, type AgentMode } from '../domain/approval.ts'
 import { canManageBudgets } from '../domain/permissions.ts'
 import { fail, ok } from './response.ts'
@@ -21,7 +22,7 @@ interface PolicyRow {
 const POLICY_COLUMNS = 'currency, auto_pay_limit_cents, agent_mode'
 
 // The company-wide part of the approval matrix. Everyone may read it; only the manager changes it.
-export function companyRoutes(app: FastifyInstance, db: Queryable): void {
+export function companyRoutes(app: FastifyInstance, db: Db): void {
   app.get('/api/company/policy', async (request) => {
     const { rows } = await db.query<PolicyRow>(`SELECT ${POLICY_COLUMNS} FROM companies WHERE id = $1`, [
       sessionUser(request).companyId
@@ -41,27 +42,19 @@ export function companyRoutes(app: FastifyInstance, db: Queryable): void {
         .send(fail('Send autoPayLimitCents (0 to 100000000) and/or agentMode (auto or always_approve)'))
     }
 
-    const { rows } = await db.query<PolicyRow & { previous_limit_cents: number; previous_mode: AgentMode }>(
-      `WITH previous AS (SELECT id, auto_pay_limit_cents, agent_mode FROM companies WHERE id = $3 FOR UPDATE)
-       UPDATE companies c
-       SET auto_pay_limit_cents = COALESCE($1, c.auto_pay_limit_cents), agent_mode = COALESCE($2, c.agent_mode)
-       FROM previous WHERE c.id = previous.id
-       RETURNING c.currency, c.auto_pay_limit_cents, c.agent_mode,
-         previous.auto_pay_limit_cents AS previous_limit_cents, previous.agent_mode AS previous_mode`,
-      [body.data.autoPayLimitCents ?? null, body.data.agentMode ?? null, user.companyId]
-    )
-    const policy = toPolicy(rows)
-    const previous = rows[0]
-    // shortcut: the audit trail is the server log until the audit table exists.
-    request.log.info(
-      {
-        audit: 'approval_rules_changed',
-        userId: user.id,
-        from: { autoPayLimitCents: previous?.previous_limit_cents, agentMode: previous?.previous_mode },
-        to: { autoPayLimitCents: policy.autoPayLimitCents, agentMode: policy.agentMode }
+    const policy = await auditedUpdate<PolicyRow & { id: number }>(db, {
+      actor: user,
+      action: 'approval_rules_changed',
+      entity: 'company',
+      lock: { sql: `SELECT id, ${POLICY_COLUMNS} FROM companies WHERE id = $1 FOR UPDATE`, params: [user.companyId] },
+      update: {
+        sql: `UPDATE companies
+              SET auto_pay_limit_cents = COALESCE($1, auto_pay_limit_cents), agent_mode = COALESCE($2, agent_mode)
+              WHERE id = $3 RETURNING id, ${POLICY_COLUMNS}`,
+        params: [body.data.autoPayLimitCents ?? null, body.data.agentMode ?? null, user.companyId]
       },
-      'Approval rules changed'
-    )
+      view: (row) => toPolicy([row])
+    })
     return ok({ policy })
   })
 }

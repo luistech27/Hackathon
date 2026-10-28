@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { auditedUpdate } from '../audit/audit.ts'
 import { sessionUser } from '../auth/session.ts'
-import type { Queryable } from '../db/client.ts'
+import type { Db } from '../db/client.ts'
 import { canManageBudgets, canViewAllGreenhouses } from '../domain/permissions.ts'
 import { spentThisMonthByGreenhouse } from '../orders/orders.ts'
 import { fail, ok } from './response.ts'
@@ -50,7 +51,7 @@ const GREENHOUSES_SQL = `
   WHERE g.company_id = $1 AND ($2::int IS NULL OR g.id = $2)
   ORDER BY g.id, s.id`
 
-export function greenhouseRoutes(app: FastifyInstance, db: Queryable): void {
+export function greenhouseRoutes(app: FastifyInstance, db: Db): void {
   app.get('/api/greenhouses', async (request) => {
     const user = sessionUser(request)
     const seesAll = canViewAllGreenhouses(user)
@@ -71,22 +72,21 @@ export function greenhouseRoutes(app: FastifyInstance, db: Queryable): void {
     }
 
     // Lowering it below what is already committed is allowed: it only stops new orders and approvals.
-    const { rows } = await db.query<{ id: number; monthly_budget_cents: number; previous_cents: number }>(
-      `WITH previous AS (
-         SELECT id, monthly_budget_cents FROM greenhouses WHERE id = $2 AND company_id = $3 FOR UPDATE
-       )
-       UPDATE greenhouses g SET monthly_budget_cents = $1 FROM previous WHERE g.id = previous.id
-       RETURNING g.id, g.monthly_budget_cents, previous.monthly_budget_cents AS previous_cents`,
-      [body.data.monthlyBudgetCents, params.data.id, user.companyId]
-    )
-    const updated = rows[0]
-    if (!updated) return reply.code(404).send(fail('Greenhouse not found'))
-    // shortcut: the audit trail is the server log until the audit table exists.
-    request.log.info(
-      { audit: 'budget_changed', userId: user.id, greenhouseId: updated.id, from: updated.previous_cents, to: updated.monthly_budget_cents },
-      'Greenhouse budget changed'
-    )
-    return ok({ greenhouse: { id: updated.id, monthlyBudgetCents: updated.monthly_budget_cents } })
+    const greenhouse = await auditedUpdate<{ id: number; monthly_budget_cents: number }>(db, {
+      actor: user,
+      action: 'budget_changed',
+      entity: 'greenhouse',
+      lock: {
+        sql: 'SELECT id, monthly_budget_cents FROM greenhouses WHERE id = $1 AND company_id = $2 FOR UPDATE',
+        params: [params.data.id, user.companyId]
+      },
+      update: {
+        sql: 'UPDATE greenhouses SET monthly_budget_cents = $1 WHERE id = $2 RETURNING id, monthly_budget_cents',
+        params: [body.data.monthlyBudgetCents, params.data.id]
+      },
+      view: (row) => ({ id: row.id, monthlyBudgetCents: row.monthly_budget_cents })
+    })
+    return greenhouse ? ok({ greenhouse }) : reply.code(404).send(fail('Greenhouse not found'))
   })
 }
 

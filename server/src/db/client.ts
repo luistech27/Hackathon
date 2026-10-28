@@ -25,6 +25,11 @@ const CONNECT_ATTEMPTS = 12 // about two minutes before giving up
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
+// A UNIQUE constraint said no (Postgres error 23505); pg and PGlite both report it this way.
+export function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505'
+}
+
 export async function openDb({ url, dataDir }: DbOptions = {}): Promise<Db> {
   const schema = await readFile(SCHEMA_URL, 'utf8')
   return url ? openPostgres(url, schema) : openPglite(dataDir, schema)

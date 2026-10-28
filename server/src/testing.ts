@@ -11,6 +11,21 @@ export async function resetDemo(db: Db): Promise<void> {
   await seedDemo(db, { deviceKey: TEST_DEVICE_KEY, demoPassword: TEST_PASSWORD })
 }
 
+// One offer per demo supplier at $1 a pack, so order tests can ask for any total in whole dollars.
+// Returns the offer id of each supplier.
+export async function addDollarOffers(db: Db): Promise<Map<number, number>> {
+  const { rows } = await db.query<{ id: number; supplier_id: number }>(
+    `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, lead_time_days)
+     SELECT 1, id, 1, 1, 100, 1 FROM suppliers WHERE company_id = 1 ORDER BY id
+     RETURNING id, supplier_id`
+  )
+  return new Map(rows.map((row) => [row.supplier_id, row.id]))
+}
+
+export function dollarItems(offers: Map<number, number>, supplierId: number, totalCents: number) {
+  return [{ offerId: offers.get(supplierId) ?? 0, packs: totalCents / 100 }]
+}
+
 // Logs in and returns the Cookie header to send with later requests.
 export async function loginAs(app: FastifyInstance, email: string): Promise<string> {
   const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: TEST_PASSWORD } })

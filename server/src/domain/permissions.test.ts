@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   canApproveOrder,
   canConfirmReceipt,
+  canApproveSuppliers,
   canManageBudgets,
   canManageCatalog,
+  canViewAudit,
   canViewAllGreenhouses,
   canViewGreenhouse,
   type Actor,
@@ -126,5 +128,15 @@ describe('separation of duties', () => {
   it("lets only managers set their company's budgets and limits", () => {
     expect(everyone.map((actor) => canManageBudgets(actor, COMPANY))).toEqual([false, false, false, true])
     expect(canManageBudgets(manager, OTHER_COMPANY)).toBe(false)
+  })
+
+  it('lets only managers approve new suppliers, never purchasing, who creates them', () => {
+    expect(everyone.map((actor) => canApproveSuppliers(actor, COMPANY))).toEqual([false, false, false, true])
+    expect(canApproveSuppliers(manager, OTHER_COMPANY)).toBe(false)
+  })
+
+  it("shows only managers their company's audit log", () => {
+    expect(everyone.map((actor) => canViewAudit(actor, COMPANY))).toEqual([false, false, false, true])
+    expect(canViewAudit(manager, OTHER_COMPANY)).toBe(false)
   })
 })

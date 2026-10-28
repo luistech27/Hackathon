@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { openDb, type Db } from '../db/client.ts'
-import { resetDemo } from '../testing.ts'
-import { createOrder, type NewOrder } from './orders.ts'
+import { addDollarOffers, dollarItems, resetDemo } from '../testing.ts'
+import { createOrder, listOrders, type NewOrder } from './orders.ts'
 
 // Demo data: company 1; greenhouses 1-3 with budgets of $1500, $1200 and $1000;
-// greenhouse 1 has a greenhouse manager with a $500 limit; suppliers 1-3.
+// greenhouse 1 has a greenhouse manager with a $500 limit; suppliers 1-3; offers 1-5, where
+// offer 1 is supplier 1's NPK at $32 per 25 kg bag and offer 2 is supplier 2's NPK, 2 bags minimum.
 let db: Db
+let dollarOffers: Map<number, number>
 
 beforeAll(async () => {
   db = await openDb()
@@ -17,16 +19,103 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDemo(db)
+  dollarOffers = await addDollarOffers(db)
 })
 
-const order = (totalCents: number, rest: Partial<NewOrder> = {}): NewOrder => ({
-  companyId: 1,
-  greenhouseId: 1,
-  supplierId: 1,
-  totalCents,
-  reasoning: 'Fertilizer runs out in 4 days and delivery takes 2.',
-  requestedBy: null,
-  ...rest
+// An order of exactly totalCents, bought at $1 a pack from the supplier.
+const order = (totalCents: number, rest: Partial<NewOrder> = {}): NewOrder => {
+  const supplierId = rest.supplierId ?? 1
+  return {
+    companyId: 1,
+    greenhouseId: 1,
+    supplierId,
+    items: dollarItems(dollarOffers, supplierId, totalCents),
+    reasoning: 'Fertilizer runs out in 4 days and delivery takes 2.',
+    requestedBy: null,
+    ...rest
+  }
+}
+
+const fromCatalog = (supplierId: number, items: NewOrder['items']): NewOrder => ({ ...order(100), supplierId, items })
+
+describe('createOrder from the catalog', () => {
+  it('prices the order from the catalog, never from the caller', async () => {
+    const created = await createOrder(db, fromCatalog(1, [{ offerId: 1, packs: 3 }]))
+
+    expect(created.totalCents).toBe(9_600)
+    expect(created.items).toEqual([
+      {
+        offerId: 1,
+        productId: 1,
+        productName: 'Fertilizante NPK 15-15-15',
+        unit: 'g',
+        packs: 3,
+        packSize: 25_000,
+        packPriceCents: 3_200,
+        lineCents: 9_600
+      }
+    ])
+  })
+
+  it('keeps the price of the moment: later catalog changes do not touch the order', async () => {
+    const created = await createOrder(db, fromCatalog(1, [{ offerId: 1, packs: 3 }]))
+    await db.query('UPDATE offers SET pack_price_cents = 9900 WHERE id = 1')
+
+    const [listed] = await listOrders(db, { id: 4, companyId: 1, role: 'manager', greenhouseId: null, approvalLimitCents: 0 })
+
+    expect(listed).toMatchObject({ id: created.id, totalCents: 9_600 })
+    expect(listed?.items[0]).toMatchObject({ packPriceCents: 3_200, lineCents: 9_600 })
+  })
+
+  it('adds up several products from the same supplier', async () => {
+    const created = await createOrder(
+      db,
+      fromCatalog(1, [
+        { offerId: 1, packs: 1 },
+        { offerId: 3, packs: 2 }
+      ])
+    )
+
+    expect(created.totalCents).toBe(3_200 + 2 * 2_900)
+  })
+
+  it.each([
+    ['an offer of another supplier', [{ offerId: 2, packs: 2 }]],
+    ['an offer that does not exist', [{ offerId: 999, packs: 1 }]]
+  ])('refuses %s', async (_name, items) => {
+    await expect(createOrder(db, fromCatalog(1, items))).rejects.toThrow(/Offer/)
+  })
+
+  it('refuses a deactivated offer or supplier', async () => {
+    await db.query('UPDATE offers SET active = false WHERE id = 1')
+    await expect(createOrder(db, fromCatalog(1, [{ offerId: 1, packs: 1 }]))).rejects.toThrow(/Offer/)
+
+    await db.query('UPDATE suppliers SET active = false WHERE id = 3')
+    await expect(createOrder(db, fromCatalog(3, [{ offerId: 5, packs: 1 }]))).rejects.toThrow(/Supplier/)
+  })
+
+  it('refuses a supplier the manager has not approved yet', async () => {
+    await db.query(`INSERT INTO suppliers (company_id, name) VALUES (1, 'Brand new')`)
+    const { rows } = await db.query<{ id: number }>(
+      `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, lead_time_days)
+       VALUES (1, 4, 1, 1, 100, 1) RETURNING id`
+    )
+
+    await expect(createOrder(db, fromCatalog(4, [{ offerId: rows[0]?.id ?? 0, packs: 1 }]))).rejects.toThrow(/Supplier/)
+  })
+
+  it.each([
+    ['an offer id that is not a whole number', [{ offerId: 1.5, packs: 1 }], 1],
+    ['fewer packs than the offer minimum', [{ offerId: 2, packs: 1 }], 2],
+    ['no items', [], 1],
+    ['the same offer twice', [{ offerId: 1, packs: 1 }, { offerId: 1, packs: 2 }], 1],
+    ['fractional packs', [{ offerId: 1, packs: 1.5 }], 1],
+    ['zero packs', [{ offerId: 1, packs: 0 }], 1],
+    ['more than 10,000 packs', [{ offerId: 1, packs: 10_001 }], 1]
+  ])('refuses %s', async (_name, items, supplierId) => {
+    await expect(createOrder(db, fromCatalog(supplierId, items))).rejects.toThrow(RangeError)
+    expect((await db.query('SELECT id FROM orders')).rows).toHaveLength(0)
+  })
 })
 
 describe('createOrder', () => {
@@ -190,13 +279,19 @@ describe('createOrder', () => {
     })
 
     it("refuses a supplier of another company", async () => {
-      await expect(createOrder(db, order(100, { supplierId: 4 }))).rejects.toThrow('Supplier')
+      const items = [{ offerId: 1, packs: 1 }]
+      await expect(createOrder(db, order(100, { supplierId: 4, items }))).rejects.toThrow('Supplier')
     })
-  })
 
-  it('refuses a total that is not a positive whole number of cents', async () => {
-    await expect(createOrder(db, order(10.5))).rejects.toThrow(RangeError)
-    const { rows } = await db.query('SELECT id FROM orders')
-    expect(rows).toHaveLength(0)
+    it("refuses an offer of another company's catalog", async () => {
+      await db.query(`INSERT INTO products (company_id, name, unit) VALUES (2, 'Their product', 'g')`)
+      const { rows } = await db.query<{ id: number }>(
+        `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, lead_time_days)
+         SELECT 2, s.id, p.id, 1, 1, 1 FROM suppliers s, products p WHERE s.company_id = 2 AND p.company_id = 2
+         RETURNING id`
+      )
+
+      await expect(createOrder(db, fromCatalog(1, [{ offerId: rows[0]?.id ?? 0, packs: 1 }]))).rejects.toThrow(/Offer/)
+    })
   })
 })

@@ -23,6 +23,9 @@ The amounts are examples the manager can change. On top of the matrix:
 - **Pending orders hold budget:** an order waiting for approval already counts against the month, and the budget is checked again when someone approves it.
 - **One at a time per greenhouse:** orders and approvals lock the greenhouse while they check the budget, so two of them can never spend the same money.
 - **Nobody approves outside their reach:** not their own request, not another greenhouse, and never purchasing, who manages the suppliers.
+- **Prices come from the catalog, never from the model:** an order only names offers and packs; the server prices it from purchasing's catalog and keeps that price, even if the catalog changes later. Purchasing sets prices but cannot approve payments; the manager approves payments but cannot set prices.
+- **New suppliers need the manager:** purchasing can add a supplier, but the agent cannot buy from it until a manager approves it, so nobody can create a supplier and send it orders on their own.
+- **Everything is on record:** every order, approval, budget, rule, supplier and price change goes into an audit log (`GET /api/audit`, manager only) in the same transaction as the change, with who, when, and the before and after.
 
 ## Status
 
@@ -33,7 +36,9 @@ The amounts are examples the manager can change. On top of the matrix:
 - [x] Login with four roles; permissions checked on the server, every route requires a session unless marked public
 - [x] Deployed on Render at https://invernadero-api-jn3j.onrender.com (server and Postgres from `render.yaml`)
 - [x] Approval matrix with a budget per greenhouse: approval inbox, approve and reject, budgets and auto-pay limit set by the manager
-- [ ] Supplier catalog, Claude agent, PayPal integration, dashboard with simulation mode
+- [x] Supplier catalog managed by purchasing, new suppliers approved by the manager; every order is priced from it and keeps the price of the moment
+- [x] Audit log of orders, approvals, budgets, rules and catalog changes
+- [ ] Claude agent, PayPal integration, dashboard with simulation mode
 
 ## Firmware
 

@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
 import { createOrder } from '../orders/orders.ts'
-import { loginAs, resetDemo } from '../testing.ts'
+import { addDollarOffers, dollarItems, loginAs, resetDemo } from '../testing.ts'
 
 let db: Db
 let app: FastifyInstance
@@ -70,8 +70,21 @@ describe('GET /api/greenhouses', () => {
 })
 
 describe('spending in GET /api/greenhouses', () => {
-  const order = (greenhouseId: number, totalCents: number, supplierId = 1) =>
-    createOrder(db, { companyId: 1, greenhouseId, supplierId, totalCents, reasoning: 'Test.', requestedBy: null })
+  let dollarOffers: Map<number, number>
+
+  beforeEach(async () => {
+    dollarOffers = await addDollarOffers(db)
+  })
+
+  const order = async (greenhouseId: number, totalCents: number, supplierId = 1) =>
+    createOrder(db, {
+      companyId: 1,
+      greenhouseId,
+      supplierId,
+      items: dollarItems(dollarOffers, supplierId, totalCents),
+      reasoning: 'Test.',
+      requestedBy: null
+    })
 
   it("shows what each greenhouse has committed this month, pending orders included, rejected ones not", async () => {
     await order(1, 9_000) // approved by the rules

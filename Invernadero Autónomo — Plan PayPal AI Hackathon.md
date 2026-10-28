@@ -138,7 +138,7 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 
 - [x] Login con los 4 roles y permisos revisados en el servidor
 - [x] Matriz de aprobación, anti-fraccionamiento y presupuesto por invernadero (TDD)
-- [ ] Catálogo de proveedores de prueba (lo maneja Compras)
+- [x] Catálogo de proveedores de prueba (lo maneja Compras)
 - [ ] Agente con Claude: predicción, consolidación por proveedor, elección y razonamiento
 
 **4–6 nov · PayPal y órdenes de compra**

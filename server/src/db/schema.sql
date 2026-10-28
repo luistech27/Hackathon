@@ -118,3 +118,73 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 
 CREATE INDEX IF NOT EXISTS orders_greenhouse_time ON orders (greenhouse_id, created_at);
+
+-- Purchasing's catalog. Nothing in it is ever deleted, only deactivated, so past orders keep their history.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  name TEXT NOT NULL,
+  unit TEXT NOT NULL CHECK (unit IN ('g', 'L')),
+  UNIQUE (company_id, id),
+  UNIQUE (company_id, name)
+);
+
+-- What each greenhouse supply is, so the agent can find who sells it.
+-- shortcut: nothing checks the product is of the greenhouse's company; only the seed sets it for now.
+ALTER TABLE supplies ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id);
+
+-- What each supplier sells: pack size in the product's unit, price per pack, minimum packs and delivery time.
+CREATE TABLE IF NOT EXISTS offers (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  supplier_id INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  pack_size DOUBLE PRECISION NOT NULL CHECK (pack_size > 0),
+  pack_price_cents INTEGER NOT NULL CHECK (pack_price_cents > 0),
+  min_packs INTEGER NOT NULL DEFAULT 1 CHECK (min_packs >= 1),
+  lead_time_days INTEGER NOT NULL CHECK (lead_time_days >= 0),
+  active BOOLEAN NOT NULL DEFAULT true,
+  FOREIGN KEY (company_id, supplier_id) REFERENCES suppliers (company_id, id),
+  FOREIGN KEY (company_id, product_id) REFERENCES products (company_id, id)
+);
+
+-- One active offer per pack: a form sent twice must not leave a forgotten cheaper copy behind.
+CREATE UNIQUE INDEX IF NOT EXISTS offers_one_active_pack ON offers (supplier_id, product_id, pack_size) WHERE active;
+
+-- Purchasing adds suppliers, but the agent only buys from the ones a manager approved
+-- (approved_by is null for the demo suppliers the seed approves).
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
+-- "Riego" and "riego" are the same supplier to whoever reads an approval.
+CREATE UNIQUE INDEX IF NOT EXISTS suppliers_company_name_ci ON suppliers (company_id, lower(name));
+
+-- Who changed what, from what to what, and when: budgets, approval rules, the catalog and orders.
+-- Written in the same transaction as the change, so a change never exists without its record.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  user_id INTEGER, -- null: the agent
+  action TEXT NOT NULL,
+  entity TEXT NOT NULL CHECK (entity IN ('company', 'greenhouse', 'supplier', 'offer', 'order')),
+  entity_id INTEGER NOT NULL,
+  before JSONB,
+  after JSONB NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (company_id, user_id) REFERENCES users (company_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS audit_log_company_time ON audit_log (company_id, at DESC);
+
+-- What an order buys, at the price of the moment it was made: later catalog changes never touch it.
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  offer_id INTEGER NOT NULL REFERENCES offers(id),
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  packs INTEGER NOT NULL CHECK (packs >= 1),
+  pack_size DOUBLE PRECISION NOT NULL CHECK (pack_size > 0),
+  pack_price_cents INTEGER NOT NULL CHECK (pack_price_cents > 0),
+  UNIQUE (order_id, offer_id)
+);
