@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildApp, RATE_LIMIT_PER_MINUTE } from './app.ts'
+import { ok } from './api/response.ts'
 import type { Db } from './db/client.ts'
 
 const brokenDb: Db = {
@@ -8,7 +9,9 @@ const brokenDb: Db = {
   close: () => Promise.resolve()
 }
 
-const postReading = (app: Awaited<ReturnType<typeof buildApp>>) =>
+type App = Awaited<ReturnType<typeof buildApp>>
+
+const postReading = (app: App) =>
   app.inject({
     method: 'POST',
     url: '/api/readings',
@@ -48,14 +51,35 @@ describe('error handling', () => {
     expect(res.statusCode).toBe(404)
     expect(res.json()).toEqual({ success: false, error: 'Not found' })
   })
+})
 
+describe('authentication by default', () => {
+  it('asks for a session on any new route not marked public', async () => {
+    const app = await buildApp(brokenDb)
+    app.get('/api/forgot-to-check', async () => ok('secret'))
+
+    const res = await app.inject({ method: 'GET', url: '/api/forgot-to-check' })
+
+    expect(res.statusCode).toBe(401)
+    expect(res.json()).toEqual({ success: false, error: 'Login required' })
+  })
+})
+
+describe('rate limits', () => {
   it('limits how many requests one client can make per minute', async () => {
     const app = await buildApp(brokenDb)
-    for (let i = 0; i < RATE_LIMIT_PER_MINUTE; i++) await postReading(app)
+    for (let i = 0; i < RATE_LIMIT_PER_MINUTE; i++) await app.inject({ method: 'GET', url: '/api/me' })
 
-    const res = await postReading(app)
+    const res = await app.inject({ method: 'GET', url: '/api/me' })
 
     expect(res.statusCode).toBe(429)
     expect(res.json().success).toBe(false)
+  })
+
+  it('keeps device readings in their own budget, so a busy dashboard cannot block them', async () => {
+    const app = await buildApp(brokenDb)
+    for (let i = 0; i <= RATE_LIMIT_PER_MINUTE; i++) await app.inject({ method: 'GET', url: '/api/me' })
+
+    expect((await postReading(app)).statusCode).not.toBe(429)
   })
 })

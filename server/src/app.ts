@@ -1,8 +1,15 @@
+import cookie from '@fastify/cookie'
+import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { authRoutes } from './api/auth.ts'
+import { greenhouseRoutes } from './api/greenhouses.ts'
 import { readingsRoutes } from './api/readings.ts'
 import { fail } from './api/response.ts'
+import { requireSessions } from './auth/session.ts'
 import type { Db } from './db/client.ts'
+
+export { LOGIN_ATTEMPTS_PER_MINUTE } from './api/auth.ts'
 
 const BODY_LIMIT_BYTES = 4 * 1024 // a real readings body is well under 1 KB
 export const RATE_LIMIT_PER_MINUTE = 60
@@ -10,7 +17,16 @@ export const RATE_LIMIT_PER_MINUTE = 60
 export async function buildApp(db: Db, { logger = false } = {}): Promise<FastifyInstance> {
   // Trust only the first hop (Render's proxy), so a client cannot fake its address in X-Forwarded-For.
   const app = Fastify({ logger, bodyLimit: BODY_LIMIT_BYTES, trustProxy: (_address, hop) => hop === 0 })
+  await app.register(helmet)
   await app.register(rateLimit, { max: RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' })
+  await app.register(cookie)
+  requireSessions(app, db)
+
+  // API answers carry user data: never let a shared browser show them again after logout.
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store')
+    return payload
+  })
 
   // Client errors (bad JSON, too large, too many requests) keep their message; server errors never leak details.
   app.setErrorHandler((error, request, reply) => {
@@ -21,6 +37,8 @@ export async function buildApp(db: Db, { logger = false } = {}): Promise<Fastify
   })
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(fail('Not found')))
 
+  authRoutes(app, db)
+  greenhouseRoutes(app, db)
   readingsRoutes(app, db)
   return app
 }

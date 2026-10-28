@@ -3,9 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
 import { hashDeviceKey } from '../auth/deviceKey.ts'
 import { openDb, type Db } from '../db/client.ts'
-import { seedDemo } from '../db/seed.ts'
+import { resetDemo, TEST_DEVICE_KEY as DEVICE_KEY } from '../testing.ts'
 
-const DEVICE_KEY = 'test-device-key-1234567890'
 const validBody = {
   readings: [
     { supplyId: 'fertilizer', level: 812.4 },
@@ -26,8 +25,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await db.query('TRUNCATE companies, greenhouses, devices, supplies, readings RESTART IDENTITY CASCADE')
-  await seedDemo(db, DEVICE_KEY)
+  await resetDemo(db)
   app = await buildApp(db)
 })
 

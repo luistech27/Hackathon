@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS greenhouses (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id),
   name TEXT NOT NULL,
-  monthly_budget_cents INTEGER NOT NULL DEFAULT 0 CHECK (monthly_budget_cents >= 0)
+  monthly_budget_cents INTEGER NOT NULL DEFAULT 0 CHECK (monthly_budget_cents >= 0),
+  UNIQUE (company_id, id) -- lets other tables require "a greenhouse of this same company"
 );
 
 -- One ESP32 per storage point. Only a SHA-256 of its key is stored.
@@ -46,3 +47,26 @@ CREATE TABLE IF NOT EXISTS readings (
 );
 
 CREATE INDEX IF NOT EXISTS readings_supply_time ON readings (supply_id, taken_at DESC);
+
+-- Operators and greenhouse managers belong to one greenhouse; purchasing and managers see them all.
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  greenhouse_id INTEGER,
+  email TEXT NOT NULL UNIQUE CHECK (email = lower(email)), -- login lowercases what the user types
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('operator', 'greenhouse_manager', 'purchasing', 'manager')),
+  password_hash TEXT NOT NULL,
+  approval_limit_cents INTEGER NOT NULL DEFAULT 0 CHECK (approval_limit_cents >= 0),
+  CHECK ((role IN ('operator', 'greenhouse_manager')) = (greenhouse_id IS NOT NULL)),
+  FOREIGN KEY (company_id, greenhouse_id) REFERENCES greenhouses (company_id, id)
+);
+
+-- Only a SHA-256 of the session token is stored.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions (expires_at);

@@ -7,6 +7,8 @@ import { fail, ok } from './response.ts'
 const MIN_SECONDS_BETWEEN_POSTS = 5 // the ESP32 sends every 60 s; faster means a bug or abuse
 const MAX_READINGS_PER_POST = 20
 const CAPACITY_TOLERANCE = 1.1 // a calibration slightly off may read a bit above the real capacity
+// Its own per-IP budget, apart from the dashboard's, so browsers on the same network cannot block devices.
+const READINGS_PER_MINUTE = 120
 
 const readingsBody = z.object({
   readings: z
@@ -23,8 +25,10 @@ interface WiredSupply {
 }
 
 // POST /api/readings: an ESP32 reports the levels of the supplies wired to it.
+// Public for sessions: devices authenticate with their own key instead.
 export function readingsRoutes(app: FastifyInstance, db: Queryable): void {
-  app.post('/api/readings', async (request, reply) => {
+  const config = { public: true, rateLimit: { max: READINGS_PER_MINUTE, timeWindow: '1 minute' } }
+  app.post('/api/readings', { config }, async (request, reply) => {
     const deviceId = await authenticateDevice(db, request.headers['x-device-key'])
     if (deviceId === null) return reply.code(401).send(fail('Unknown or missing device key'))
 

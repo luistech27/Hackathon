@@ -21,7 +21,8 @@ The model proposes, the code decides. Every purchase the agent suggests goes thr
 - [x] PayPal Sandbox vaulting checked: a saved PayPal account is charged without the owner present
 - [ ] ESP32 firmware for fertilizer and water levels (`firmware/Invernadero`): written, not yet tested on hardware
 - [x] Backend base: data model (company, greenhouses, devices, supplies, readings) and `POST /api/readings` with per-device keys
-- [ ] Deploy on Render, Claude agent, roles and approvals, PayPal integration, dashboard with simulation mode
+- [x] Login with four roles; permissions checked on the server, every route requires a session unless marked public
+- [ ] Deploy on Render, approval matrix, Claude agent, PayPal integration, dashboard with simulation mode
 
 ## Firmware
 
@@ -52,6 +53,17 @@ npm run dev
 ```
 
 Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
+
+### Demo users
+
+All four use the password set in `DEMO_PASSWORD`.
+
+| Email | Role | Can do |
+| --- | --- | --- |
+| `operador@agroandes.test` | Operator | See greenhouse 1, confirm deliveries |
+| `encargado@agroandes.test` | Greenhouse manager | Approve greenhouse 1 orders up to $500 |
+| `compras@agroandes.test` | Purchasing | Manage suppliers and prices, never approve |
+| `gerente@agroandes.test` | Manager | Set budgets and limits, approve any order |
 
 ## License
 
