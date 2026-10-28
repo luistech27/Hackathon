@@ -1,9 +1,10 @@
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 import { authRoutes } from './api/auth.ts'
 import { greenhouseRoutes } from './api/greenhouses.ts'
+import { healthRoutes } from './api/health.ts'
 import { readingsRoutes } from './api/readings.ts'
 import { fail } from './api/response.ts'
 import { requireSessions } from './auth/session.ts'
@@ -14,9 +15,19 @@ export { LOGIN_ATTEMPTS_PER_MINUTE } from './api/auth.ts'
 const BODY_LIMIT_BYTES = 4 * 1024 // a real readings body is well under 1 KB
 export const RATE_LIMIT_PER_MINUTE = 60
 
-export async function buildApp(db: Db, { logger = false } = {}): Promise<FastifyInstance> {
-  // Trust only the first hop (Render's proxy), so a client cannot fake its address in X-Forwarded-For.
-  const app = Fastify({ logger, bodyLimit: BODY_LIMIT_BYTES, trustProxy: (_address, hop) => hop === 0 })
+export interface AppOptions {
+  logger?: boolean
+  // Proxies in front of the server (Render's, by default one). Each one appends to X-Forwarded-For,
+  // so request.ip is read that many entries from the right, where a client cannot write.
+  trustedProxyHops?: number
+}
+
+export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1 }: AppOptions = {}): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: logger && { serializers: { req: requestLog } },
+    bodyLimit: BODY_LIMIT_BYTES,
+    trustProxy: (_address, hop) => hop < trustedProxyHops
+  })
   await app.register(helmet)
   await app.register(rateLimit, { max: RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' })
   await app.register(cookie)
@@ -39,8 +50,19 @@ export async function buildApp(db: Db, { logger = false } = {}): Promise<Fastify
 
   authRoutes(app, db)
   greenhouseRoutes(app, db)
+  healthRoutes(app)
   readingsRoutes(app, db)
   return app
+}
+
+// The full proxy chain is logged so the number of trusted hops can be checked against real traffic.
+function requestLog(request: FastifyRequest) {
+  return {
+    method: request.method,
+    url: request.url,
+    remoteAddress: request.ip,
+    forwardedFor: request.headers['x-forwarded-for']
+  }
 }
 
 // Fastify throws Errors with a statusCode; the rate limiter throws a plain object with one.

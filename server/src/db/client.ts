@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import pg, { type QueryResultRow } from 'pg'
+import { retry } from './retry.ts'
 
 export interface Queryable {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>
@@ -20,6 +21,9 @@ export interface DbOptions {
 const SCHEMA_URL = new URL('./schema.sql', import.meta.url)
 const POOL_SIZE = 5
 const DB_TIMEOUT_MS = 5000
+const CONNECT_ATTEMPTS = 12 // about two minutes before giving up
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 export async function openDb({ url, dataDir }: DbOptions = {}): Promise<Db> {
   const schema = await readFile(SCHEMA_URL, 'utf8')
@@ -35,7 +39,13 @@ async function openPostgres(url: string, schema: string): Promise<Db> {
   })
   // Without a listener, an idle connection dropped by the server crashes the whole process.
   pool.on('error', (error) => process.emitWarning(`Postgres idle client error: ${error.message}`))
-  await pool.query(schema)
+  // On the first deploy the server can start before the new database accepts connections.
+  await retry(() => pool.query(schema), {
+    attempts: CONNECT_ATTEMPTS,
+    delayMs: DB_TIMEOUT_MS,
+    onRetry: (error, attempt) =>
+      process.emitWarning(`Postgres not ready (attempt ${attempt} of ${CONNECT_ATTEMPTS}): ${errorMessage(error)}`)
+  })
 
   const queryWith =
     (client: pg.Pool | pg.PoolClient) =>

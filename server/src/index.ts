@@ -14,6 +14,11 @@ if (!demoPassword || demoPassword.length < MIN_DEMO_PASSWORD_LENGTH) {
   throw new Error(`DEMO_PASSWORD must be set and at least ${MIN_DEMO_PASSWORD_LENGTH} characters long`)
 }
 
+const trustedProxyHops = Number(process.env.TRUSTED_PROXY_HOPS ?? 1)
+if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 1) {
+  throw new Error('TRUSTED_PROXY_HOPS must be a whole number of at least 1')
+}
+
 // Render wipes local files on every deploy, so PGlite there would silently lose all data.
 if (process.env.RENDER && !process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL must be set on Render')
@@ -22,7 +27,7 @@ if (process.env.RENDER && !process.env.DATABASE_URL) {
 const db = await openDb({ url: process.env.DATABASE_URL, dataDir: '.data' })
 await seedDemo(db, { deviceKey, demoPassword })
 
-const app = await buildApp(db, { logger: true })
+const app = await buildApp(db, { logger: true, trustedProxyHops })
 await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' })
 
 // Close cleanly so the local PGlite files are not left half-written.

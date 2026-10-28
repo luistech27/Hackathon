@@ -83,3 +83,48 @@ describe('rate limits', () => {
     expect((await postReading(app)).statusCode).not.toBe(429)
   })
 })
+
+describe('client address behind proxies', () => {
+  const ipSeenBy = async (app: App, forwardedFor: string) => {
+    app.get('/ip', { config: { public: true } }, async (request) => request.ip)
+    const res = await app.inject({
+      method: 'GET',
+      url: '/ip',
+      remoteAddress: '10.0.0.1',
+      headers: { 'x-forwarded-for': forwardedFor }
+    })
+    return res.body
+  }
+
+  it('uses the address the proxy saw, not one the client wrote in the header', async () => {
+    const app = await buildApp(brokenDb)
+
+    expect(await ipSeenBy(app, '6.6.6.6, 203.0.113.7')).toBe('203.0.113.7')
+  })
+
+  it('skips as many proxies as it is told to trust', async () => {
+    const app = await buildApp(brokenDb, { trustedProxyHops: 2 })
+
+    expect(await ipSeenBy(app, '6.6.6.6, 203.0.113.7, 172.70.1.1')).toBe('203.0.113.7')
+  })
+})
+
+describe('health check', () => {
+  it('answers without a session and without touching the database', async () => {
+    const app = await buildApp(brokenDb)
+
+    const res = await app.inject({ method: 'GET', url: '/api/health' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual(ok({ status: 'ok' }))
+  })
+
+  it('is never rate limited, so the host does not restart a healthy server', async () => {
+    const app = await buildApp(brokenDb)
+    for (let i = 0; i <= RATE_LIMIT_PER_MINUTE; i++) await app.inject({ method: 'GET', url: '/api/health' })
+
+    const res = await app.inject({ method: 'GET', url: '/api/health' })
+
+    expect(res.statusCode).toBe(200)
+  })
+})

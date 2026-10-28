@@ -1,0 +1,36 @@
+# Render Blueprint: the backend and its Postgres database.
+# Create it once in the Render Dashboard with New > Blueprint; later pushes to main redeploy the server.
+# Secrets are never written here: Render asks for each `sync: false` value when the Blueprint is created.
+
+services:
+  - type: web
+    name: invernadero-api
+    runtime: node
+    region: virginia # closest Render region to Ecuador
+    plan: 0.5c-512mb # paid plan: never sleeps, so the ESP32 always has somewhere to post
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/index.ts # not `npm start`, so SIGTERM reaches the server and it closes cleanly
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: '24' # runs the TypeScript sources directly; package.json allows any newer major
+      - key: TRUSTED_PROXY_HOPS
+        value: '1' # proxies Render puts in front; check `forwardedFor` in the request logs after deploy
+      - key: DATABASE_URL
+        fromDatabase:
+          name: invernadero-db
+          property: connectionString # private network address, never leaves Render
+      - key: DEVICE_API_KEY
+        sync: false # same value as firmware/Invernadero/secrets.h
+      - key: DEMO_PASSWORD
+        sync: false # shared by the four demo users
+
+databases:
+  - name: invernadero-db
+    region: virginia # must match the service to use the private address
+    plan: 0.1c-256mb # free databases are deleted after 30 days, before judging ends
+    postgresMajorVersion: '18' # same major version as PGlite in local runs and tests
+    databaseName: invernadero
+    user: invernadero
+    ipAllowList: [] # only the service can connect, nothing from the internet

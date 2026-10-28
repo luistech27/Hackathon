@@ -65,6 +65,16 @@ All four use the password set in `DEMO_PASSWORD`.
 | `compras@agroandes.test` | Purchasing | Manage suppliers and prices, never approve |
 | `gerente@agroandes.test` | Manager | Set budgets and limits, approve any order |
 
+## Deploy on Render
+
+`render.yaml` describes the server and a private Postgres database.
+
+1. In the Render Dashboard choose **New > Blueprint** and pick this repository.
+2. When asked, enter `DEVICE_API_KEY` (the same value as the ESP32's `secrets.h`) and `DEMO_PASSWORD`.
+3. Apply. Every push to `main` redeploys the server.
+
+Then point the ESP32 at it: set `SERVER_URL` in `secrets.h` to the service's `https://….onrender.com` address and upload the sketch again.
+
 ## License
 
 [MIT](LICENSE)
