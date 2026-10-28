@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseOffer, type OfferRequest, type SupplierOffer } from './suppliers.js'
+import { chooseOffer, type OfferRequest, type SupplierOffer } from './suppliers.ts'
 
 const tiendaPapas: SupplierOffer = {
   supplierId: 'tienda-papas',

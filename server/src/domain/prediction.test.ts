@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daysRemaining, estimateDailyConsumption, shouldReorder, type LevelReading } from './prediction.js'
+import { daysRemaining, estimateDailyConsumption, shouldReorder, type LevelReading } from './prediction.ts'
 
 const DAY_MS = 86_400_000
 const at = (day: number, level: number): LevelReading => ({ takenAt: day * DAY_MS, level })

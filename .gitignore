@@ -11,3 +11,6 @@ firmware/**/secrets.h
 
 # PlatformIO
 .pio/
+
+# Local PGlite database
+.data/

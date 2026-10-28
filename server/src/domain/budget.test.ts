@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evaluatePurchase, type BudgetRules, type PurchaseMode, type ProposedPurchase } from './budget.js'
+import { evaluatePurchase, type BudgetRules, type PurchaseMode, type ProposedPurchase } from './budget.ts'
 
 const rules: BudgetRules = {
   monthlyBudgetCents: 10_000,

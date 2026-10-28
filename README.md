@@ -20,7 +20,8 @@ The model proposes, the code decides. Every purchase the agent suggests goes thr
 - [x] Decision logic: consumption forecast, supplier choice, budget rules (`server/src/domain/`)
 - [x] PayPal Sandbox vaulting checked: a saved PayPal account is charged without the owner present
 - [ ] ESP32 firmware for fertilizer and water levels (`firmware/Invernadero`): written, not yet tested on hardware
-- [ ] Backend on Render, Claude agent, PayPal integration, dashboard with simulation mode
+- [x] Backend base: data model (company, greenhouses, devices, supplies, readings) and `POST /api/readings` with per-device keys
+- [ ] Deploy on Render, Claude agent, roles and approvals, PayPal integration, dashboard with simulation mode
 
 ## Firmware
 
@@ -40,9 +41,17 @@ npm install
 npm test
 ```
 
-## Configuration
+## Run the backend
 
-Copy `.env.example` to `.env` and fill in the values. Nothing reads them yet.
+Requires Node.js 24 or newer. Copy `.env.example` to `.env` and set at least `DEVICE_API_KEY`.
+
+```bash
+cd server
+npm install
+npm run dev
+```
+
+Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
 
 ## License
 
