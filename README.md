@@ -8,12 +8,21 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) 2026
 
 ## How spending stays safe
 
-The model proposes, the code decides. Every purchase the agent suggests goes through a plain, unit-tested rule check before any money moves:
+The model proposes, the code decides. Every order goes through a plain, unit-tested approval matrix (`server/src/domain/approval.ts`) before any money moves:
 
-- Suppliers the owner has not allowed are rejected.
-- Orders that would go over the monthly budget are rejected, even with approval.
-- Orders above the per-order maximum, or any order in "always ask" mode, wait for the owner's approval.
-- Everything else is paid automatically.
+| Order | Who decides |
+| --- | --- |
+| Would go over the greenhouse's monthly budget | Nobody: rejected. Only the manager can raise the budget |
+| Up to $100 | The agent pays on its own |
+| Up to the greenhouse manager's limit ($500) | That greenhouse's manager, or the manager |
+| Above that | The manager |
+
+The amounts are examples the manager can change. On top of the matrix:
+
+- **No order splitting:** who must approve depends on the order plus everything bought from the same supplier for that greenhouse in the last 7 days, so a big order cut into small ones still needs approval.
+- **Pending orders hold budget:** an order waiting for approval already counts against the month, and the budget is checked again when someone approves it.
+- **One at a time per greenhouse:** orders and approvals lock the greenhouse while they check the budget, so two of them can never spend the same money.
+- **Nobody approves outside their reach:** not their own request, not another greenhouse, and never purchasing, who manages the suppliers.
 
 ## Status
 
@@ -23,7 +32,8 @@ The model proposes, the code decides. Every purchase the agent suggests goes thr
 - [x] Backend base: data model (company, greenhouses, devices, supplies, readings) and `POST /api/readings` with per-device keys
 - [x] Login with four roles; permissions checked on the server, every route requires a session unless marked public
 - [x] Deployed on Render at https://invernadero-api-jn3j.onrender.com (server and Postgres from `render.yaml`)
-- [ ] Approval matrix, Claude agent, PayPal integration, dashboard with simulation mode
+- [x] Approval matrix with a budget per greenhouse: approval inbox, approve and reject, budgets and auto-pay limit set by the manager
+- [ ] Supplier catalog, Claude agent, PayPal integration, dashboard with simulation mode
 
 ## Firmware
 

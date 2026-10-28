@@ -18,7 +18,8 @@ Un agente de compras para invernaderos comerciales. Sensores con ESP32 vigilan l
 - [x] PayPal Vault probado en Sandbox: método guardado y cobro de $1.00 COMPLETED sin el dueño presente
 - [x] Firmware del ESP32 (balanza HX711 y ultrasónico) que compila para ESP32, S3 y C6
 - [ ] Probar y calibrar el firmware en el hardware real
-- [ ] Créditos de Render: el portal dio "Origin not allowed"; se escribió a devrel+credits@render.com
+- [x] Render pagado con el código promocional de $50: servidor y Postgres en https://invernadero-api-jn3j.onrender.com
+- [x] Login con los 4 roles, matriz de aprobación y presupuesto por invernadero, con TDD
 
 ## Requisitos de entrega
 
@@ -131,12 +132,12 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 
 - [ ] Conectar y calibrar balanza y ultrasónico en el ESP32 real (tú)
 - [ ] Nombre de insumo configurable en el firmware
-- [ ] Backend en Render con Postgres: empresas, invernaderos, insumos, lecturas (`POST /api/readings` con clave de dispositivo)
+- [x] Backend en Render con Postgres: empresas, invernaderos, insumos, lecturas (`POST /api/readings` con clave de dispositivo)
 
 **31 oct – 3 nov · Agente, roles y reglas**
 
-- [ ] Login con los 4 roles y permisos revisados en el servidor
-- [ ] Matriz de aprobación, anti-fraccionamiento y presupuesto por invernadero (TDD)
+- [x] Login con los 4 roles y permisos revisados en el servidor
+- [x] Matriz de aprobación, anti-fraccionamiento y presupuesto por invernadero (TDD)
 - [ ] Catálogo de proveedores de prueba (lo maneja Compras)
 - [ ] Agente con Claude: predicción, consolidación por proveedor, elección y razonamiento
 

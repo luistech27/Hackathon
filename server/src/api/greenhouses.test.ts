@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
+import { createOrder } from '../orders/orders.ts'
 import { loginAs, resetDemo } from '../testing.ts'
 
 let db: Db
@@ -65,5 +66,73 @@ describe('GET /api/greenhouses', () => {
 
     expect(res.statusCode).toBe(401)
     expect(res.json().success).toBe(false)
+  })
+})
+
+describe('spending in GET /api/greenhouses', () => {
+  const order = (greenhouseId: number, totalCents: number, supplierId = 1) =>
+    createOrder(db, { companyId: 1, greenhouseId, supplierId, totalCents, reasoning: 'Test.', requestedBy: null })
+
+  it("shows what each greenhouse has committed this month, pending orders included, rejected ones not", async () => {
+    await order(1, 9_000) // approved by the rules
+    await order(1, 30_000, 2) // pending
+    const rejected = await order(1, 60_000, 3)
+    await db.query(`UPDATE orders SET status = 'rejected', decided_at = now() WHERE id = $1`, [rejected.id])
+    await order(2, 5_000)
+
+    const { greenhouses } = (await listAs('gerente@agroandes.test')).json().data
+
+    expect(greenhouses.map((g: { spentThisMonthCents: number }) => g.spentThisMonthCents)).toEqual([39_000, 5_000, 0])
+  })
+})
+
+describe('PATCH /api/greenhouses/:id/budget', () => {
+  const setBudget = async (email: string, id: number | string, body: unknown) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/api/greenhouses/${id}/budget`,
+      headers: { cookie: await loginAs(app, email) },
+      payload: body as object
+    })
+
+  it('lets the manager change a greenhouse budget', async () => {
+    const res = await setBudget('gerente@agroandes.test', 2, { monthlyBudgetCents: 200_000 })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data.greenhouse).toEqual({ id: 2, monthlyBudgetCents: 200_000 })
+    const { greenhouses } = (await listAs('gerente@agroandes.test')).json().data
+    expect(greenhouses[1].monthlyBudgetCents).toBe(200_000)
+  })
+
+  it.each(['operador@agroandes.test', 'encargado@agroandes.test', 'compras@agroandes.test'])(
+    'never lets %s change a budget',
+    async (email) => {
+      expect((await setBudget(email, 1, { monthlyBudgetCents: 999_999 })).statusCode).toBe(403)
+    }
+  )
+
+  it("answers 404 for another company's greenhouse or one that does not exist", async () => {
+    await db.query(
+      `WITH other AS (INSERT INTO companies (name) VALUES ('Other farm') RETURNING id)
+       INSERT INTO greenhouses (company_id, name) SELECT id, 'Not yours' FROM other`
+    )
+
+    expect((await setBudget('gerente@agroandes.test', 4, { monthlyBudgetCents: 1 })).statusCode).toBe(404)
+    expect((await setBudget('gerente@agroandes.test', 99, { monthlyBudgetCents: 1 })).statusCode).toBe(404)
+  })
+
+  it.each([
+    ['a negative amount', { monthlyBudgetCents: -1 }],
+    ['fractions of a cent', { monthlyBudgetCents: 10.5 }],
+    ['text', { monthlyBudgetCents: '1000' }],
+    ['more than a million dollars', { monthlyBudgetCents: 100_000_001 }],
+    ['nothing', {}],
+    ['unknown fields', { monthlyBudgetCents: 1, companyId: 2 }]
+  ])('answers 400 for %s', async (_name, body) => {
+    expect((await setBudget('gerente@agroandes.test', 1, body)).statusCode).toBe(400)
+  })
+
+  it('answers 400 for an invalid greenhouse id', async () => {
+    expect((await setBudget('gerente@agroandes.test', 'abc', { monthlyBudgetCents: 1 })).statusCode).toBe(400)
   })
 })

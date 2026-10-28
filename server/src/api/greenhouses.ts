@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import { sessionUser } from '../auth/session.ts'
 import type { Queryable } from '../db/client.ts'
-import { canViewAllGreenhouses } from '../domain/permissions.ts'
-import { ok } from './response.ts'
+import { canManageBudgets, canViewAllGreenhouses } from '../domain/permissions.ts'
+import { spentThisMonthByGreenhouse } from '../orders/orders.ts'
+import { fail, ok } from './response.ts'
+import { cents, idParams } from './schemas.ts'
+
+const budgetBody = z.object({ monthlyBudgetCents: cents }).strict()
 
 interface Row {
   greenhouse_id: number
@@ -29,6 +34,7 @@ interface GreenhouseView {
   id: number
   name: string
   monthlyBudgetCents: number
+  spentThisMonthCents: number // every order not rejected, pending ones too
   supplies: SupplyView[]
 }
 
@@ -50,17 +56,48 @@ export function greenhouseRoutes(app: FastifyInstance, db: Queryable): void {
     const seesAll = canViewAllGreenhouses(user)
     if (!seesAll && user.greenhouseId === null) return ok({ greenhouses: [] }) // the schema forbids this; fail closed
     const { rows } = await db.query<Row>(GREENHOUSES_SQL, [user.companyId, seesAll ? null : user.greenhouseId])
-    return ok({ greenhouses: groupByGreenhouse(rows) })
+    const spent = await spentThisMonthByGreenhouse(db, user.companyId)
+    return ok({ greenhouses: groupByGreenhouse(rows, spent) })
+  })
+
+  app.patch('/api/greenhouses/:id/budget', async (request, reply) => {
+    const user = sessionUser(request)
+    if (!canManageBudgets(user, user.companyId)) return reply.code(403).send(fail('Only the manager can change budgets'))
+    const params = idParams.safeParse(request.params)
+    if (!params.success) return reply.code(400).send(fail('Invalid greenhouse id'))
+    const body = budgetBody.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send(fail('monthlyBudgetCents must be a whole number of cents from 0 to 100000000'))
+    }
+
+    // Lowering it below what is already committed is allowed: it only stops new orders and approvals.
+    const { rows } = await db.query<{ id: number; monthly_budget_cents: number; previous_cents: number }>(
+      `WITH previous AS (
+         SELECT id, monthly_budget_cents FROM greenhouses WHERE id = $2 AND company_id = $3 FOR UPDATE
+       )
+       UPDATE greenhouses g SET monthly_budget_cents = $1 FROM previous WHERE g.id = previous.id
+       RETURNING g.id, g.monthly_budget_cents, previous.monthly_budget_cents AS previous_cents`,
+      [body.data.monthlyBudgetCents, params.data.id, user.companyId]
+    )
+    const updated = rows[0]
+    if (!updated) return reply.code(404).send(fail('Greenhouse not found'))
+    // shortcut: the audit trail is the server log until the audit table exists.
+    request.log.info(
+      { audit: 'budget_changed', userId: user.id, greenhouseId: updated.id, from: updated.previous_cents, to: updated.monthly_budget_cents },
+      'Greenhouse budget changed'
+    )
+    return ok({ greenhouse: { id: updated.id, monthlyBudgetCents: updated.monthly_budget_cents } })
   })
 }
 
-function groupByGreenhouse(rows: Row[]): GreenhouseView[] {
+function groupByGreenhouse(rows: Row[], spent: Map<number, number>): GreenhouseView[] {
   const byId = new Map<number, GreenhouseView>()
   for (const row of rows) {
     const greenhouse = byId.get(row.greenhouse_id) ?? {
       id: row.greenhouse_id,
       name: row.greenhouse_name,
       monthlyBudgetCents: row.monthly_budget_cents,
+      spentThisMonthCents: spent.get(row.greenhouse_id) ?? 0,
       supplies: []
     }
     byId.set(row.greenhouse_id, greenhouse)

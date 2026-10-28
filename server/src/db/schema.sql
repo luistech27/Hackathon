@@ -70,3 +70,51 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions (expires_at);
+
+-- Approval matrix settings the manager controls (see server/src/domain/approval.ts).
+-- Added with ALTER so databases created before these columns existed get them too.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS
+  auto_pay_limit_cents INTEGER NOT NULL DEFAULT 10000 CHECK (auto_pay_limit_cents >= 0);
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS
+  agent_mode TEXT NOT NULL DEFAULT 'auto' CHECK (agent_mode IN ('auto', 'always_approve'));
+-- Budgets are monthly in the company's own calendar, not UTC.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'America/Guayaquil';
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  name TEXT NOT NULL,
+  UNIQUE (company_id, id),
+  UNIQUE (company_id, name)
+);
+
+-- Lets orders require "a user of this same company".
+CREATE UNIQUE INDEX IF NOT EXISTS users_company_id ON users (company_id, id);
+
+-- Every order the agent (or a person) proposes, including the ones the rules rejected, for the record.
+-- Orders not rejected count against the budget from the moment they are created, pending ones too.
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  greenhouse_id INTEGER NOT NULL,
+  supplier_id INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL CHECK (total_cents > 0),
+  approval_amount_cents INTEGER NOT NULL CHECK (approval_amount_cents >= total_cents), -- plus 7 days, same supplier
+  -- shortcut: new statuses (paid, received) need this constraint dropped and added again.
+  status TEXT NOT NULL CONSTRAINT orders_status_valid CHECK (status IN ('pending_approval', 'approved', 'rejected')),
+  required_approver TEXT CHECK (required_approver IN ('greenhouse_manager', 'manager')),
+  rule_reason TEXT NOT NULL, -- why the rules decided what they did; kept after a person decides
+  reasoning TEXT NOT NULL CHECK (char_length(reasoning) <= 500), -- the agent's one-sentence explanation
+  requested_by INTEGER, -- null: the agent
+  decided_by INTEGER, -- null: the rules decided alone
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at TIMESTAMPTZ,
+  FOREIGN KEY (company_id, greenhouse_id) REFERENCES greenhouses (company_id, id),
+  FOREIGN KEY (company_id, supplier_id) REFERENCES suppliers (company_id, id),
+  FOREIGN KEY (company_id, requested_by) REFERENCES users (company_id, id),
+  FOREIGN KEY (company_id, decided_by) REFERENCES users (company_id, id),
+  CHECK ((status = 'pending_approval') = (decided_at IS NULL)),
+  CHECK (status <> 'pending_approval' OR required_approver IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS orders_greenhouse_time ON orders (greenhouse_id, created_at);

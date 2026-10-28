@@ -54,6 +54,22 @@ describe('seedDemo', () => {
     expect(rows).toHaveLength(4)
   })
 
+  it('adds the demo suppliers once, also to a database seeded before suppliers existed', async () => {
+    await db.query('DELETE FROM suppliers')
+
+    await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
+    await seedDemo(db, { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' })
+
+    const { rows } = await db.query('SELECT id FROM suppliers')
+    expect(rows).toHaveLength(3)
+  })
+
+  it('starts the company with a $100 auto-pay limit and the agent in auto mode', async () => {
+    const { rows } = await db.query('SELECT auto_pay_limit_cents, agent_mode, timezone FROM companies')
+
+    expect(rows).toEqual([{ auto_pay_limit_cents: 10_000, agent_mode: 'auto', timezone: 'America/Guayaquil' }])
+  })
+
   it('wires the fertilizer scale and the water tank to the real device', async () => {
     const { rows } = await db.query<{ device_supply_id: string; unit: string }>(
       'SELECT device_supply_id, unit FROM supplies WHERE device_id IS NOT NULL ORDER BY device_supply_id'

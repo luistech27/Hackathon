@@ -18,6 +18,7 @@ export interface GreenhouseRef {
 
 export interface OrderToApprove extends GreenhouseRef {
   totalCents: number
+  approvalAmountCents: number // the total plus the last 7 days with the same supplier (see domain/approval.ts)
   requestedBy: number | 'agent' // user id, or the agent
 }
 
@@ -34,14 +35,16 @@ export function canViewGreenhouse(actor: Actor, greenhouse: GreenhouseRef): bool
 }
 
 // Nobody approves their own request; greenhouse managers only their greenhouse, up to their limit.
+// The same check allows rejecting: whoever may say yes may also say no.
 export function canApproveOrder(actor: Actor, order: OrderToApprove): boolean {
   if (!sameCompany(actor, order.companyId) || actor.id === order.requestedBy) return false
   if (!Number.isSafeInteger(order.totalCents) || order.totalCents <= 0) return false
+  if (!Number.isSafeInteger(order.approvalAmountCents) || order.approvalAmountCents < order.totalCents) return false
   if (actor.role === 'manager') return true
   return (
     actor.role === 'greenhouse_manager' &&
     actor.greenhouseId === order.greenhouseId &&
-    order.totalCents <= actor.approvalLimitCents
+    order.approvalAmountCents <= actor.approvalLimitCents
   )
 }
 

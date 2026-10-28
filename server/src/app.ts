@@ -3,8 +3,10 @@ import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 import { authRoutes } from './api/auth.ts'
+import { companyRoutes } from './api/company.ts'
 import { greenhouseRoutes } from './api/greenhouses.ts'
 import { healthRoutes } from './api/health.ts'
+import { orderRoutes } from './api/orders.ts'
 import { readingsRoutes } from './api/readings.ts'
 import { fail } from './api/response.ts'
 import { requireSessions } from './auth/session.ts'
@@ -49,8 +51,10 @@ export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1 }:
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(fail('Not found')))
 
   authRoutes(app, db)
+  companyRoutes(app, db)
   greenhouseRoutes(app, db)
   healthRoutes(app)
+  orderRoutes(app, db)
   readingsRoutes(app, db)
   return app
 }

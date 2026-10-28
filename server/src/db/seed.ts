@@ -36,6 +36,9 @@ const DEMO_USERS = [
   { email: 'gerente@agroandes.test', name: 'Marta Gerente', role: 'manager', inRealGreenhouse: false, limitCents: 0 }
 ]
 
+// Names only for now; purchasing will manage their catalog of prices.
+const DEMO_SUPPLIERS = ['AgroInsumos Andinos', 'Fertilizantes del Valle', 'Riego y Agua Express']
+
 export interface DemoSecrets {
   deviceKey: string
   demoPassword: string
@@ -51,21 +54,32 @@ export async function seedDemo(db: Db, { deviceKey, demoPassword }: DemoSecrets)
     const existing = await tx.query('SELECT 1 FROM companies LIMIT 1')
     if (existing.rows.length === 0) await insertDemo(tx, hashDeviceKey(deviceKey))
     await tx.query('UPDATE devices SET key_hash = $1 WHERE name = $2', [hashDeviceKey(deviceKey), DEMO_DEVICE_NAME])
-    await upsertDemoUsers(tx, passwordHash)
+    const demo = await findDemo(tx)
+    await upsertDemoUsers(tx, demo, passwordHash)
+    await upsertDemoSuppliers(tx, demo.company_id)
   })
 }
 
-// Created or refreshed on every start, so a database seeded before users existed still gets them.
-// They share DEMO_PASSWORD on purpose: it goes in the README for the judges.
-async function upsertDemoUsers(tx: Queryable, passwordHash: string): Promise<void> {
-  const { rows } = await tx.query<{ company_id: number; greenhouse_id: number }>(
+interface DemoRefs {
+  company_id: number
+  greenhouse_id: number // the one with the real ESP32
+}
+
+async function findDemo(tx: Queryable): Promise<DemoRefs> {
+  const { rows } = await tx.query<DemoRefs>(
     `SELECT g.company_id, g.id AS greenhouse_id FROM devices d
      JOIN greenhouses g ON g.id = d.greenhouse_id WHERE d.name = $1`,
     [DEMO_DEVICE_NAME]
   )
   const demo = rows[0]
   if (!demo) throw new Error(`Demo device "${DEMO_DEVICE_NAME}" not found: reset the database to reseed`)
+  return demo
+}
 
+// The upserts below run on every start, so a database seeded before these rows existed still gets them.
+
+// They share DEMO_PASSWORD on purpose: it goes in the README for the judges.
+async function upsertDemoUsers(tx: Queryable, demo: DemoRefs, passwordHash: string): Promise<void> {
   for (const user of DEMO_USERS) {
     await tx.query(
       `INSERT INTO users (company_id, greenhouse_id, email, name, role, password_hash, approval_limit_cents)
@@ -82,6 +96,14 @@ async function upsertDemoUsers(tx: Queryable, passwordHash: string): Promise<voi
       ]
     )
   }
+}
+
+async function upsertDemoSuppliers(tx: Queryable, companyId: number): Promise<void> {
+  await tx.query(
+    `INSERT INTO suppliers (company_id, name) SELECT $1, unnest($2::text[])
+     ON CONFLICT (company_id, name) DO NOTHING`,
+    [companyId, DEMO_SUPPLIERS]
+  )
 }
 
 async function insertDemo(tx: Queryable, deviceKeyHash: string): Promise<void> {

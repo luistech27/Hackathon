@@ -32,7 +32,8 @@ const elsewhere: GreenhouseRef = { companyId: OTHER_COMPANY, greenhouseId: OWN }
 
 const order = (overrides: Partial<OrderToApprove> = {}): OrderToApprove => ({
   ...here(),
-  totalCents: 20_000,
+  totalCents: overrides.totalCents ?? 20_000,
+  approvalAmountCents: overrides.approvalAmountCents ?? overrides.totalCents ?? 20_000,
   requestedBy: 'agent',
   ...overrides
 })
@@ -85,9 +86,20 @@ describe('canApproveOrder', () => {
     expect(canApproveOrder(manager, order({ companyId: OTHER_COMPANY }))).toBe(false)
   })
 
+  it('measures the greenhouse manager limit with the 7-day sum for the same supplier, not the order alone', () => {
+    const split = order({ totalCents: 20_000, approvalAmountCents: 60_000 })
+
+    expect(canApproveOrder(greenhouseManager, split)).toBe(false)
+    expect(canApproveOrder(manager, split)).toBe(true)
+  })
+
   it.each([0, -5_000, 10.5, NaN])('refuses a total of %s cents', (totalCents) => {
     expect(canApproveOrder(manager, order({ totalCents }))).toBe(false)
     expect(canApproveOrder(greenhouseManager, order({ totalCents }))).toBe(false)
+  })
+
+  it('refuses an approval amount below the order total', () => {
+    expect(canApproveOrder(manager, order({ totalCents: 20_000, approvalAmountCents: 100 }))).toBe(false)
   })
 })
 
