@@ -16,28 +16,98 @@ const PAYMENT_ERRORS = {
   ORDER_PAYER_ACTION_REQUIRED: 'PayPal wants the account owner to approve again: connect PayPal again'
 }
 
-let tags = new Map() // each order's payment tag last shown, to animate the ones that changed
+let tags = new Map() // each order's payment tag last shown, by list and order, to animate the ones that changed
+const filters = { month: null, greenhouseId: '', status: '' } // month: null until the choices are loaded
 
 const packsOf = (item) => `${item.packs} × ${quantity(item.packSize, item.unit)} ${item.productName}`
 const label = (order) => order.poNumber ?? `Order #${order.id}`
+const monthName = (month) =>
+  new Date(`${month}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
-export async function loadOrders(force = true) {
-  const res = await api('GET', '/api/orders')
-  if (!res.ok || (!force && editing())) return
-  const orders = res.data.orders
-  const previous = tags
+let latestRequest = 0 // a slower, older answer never replaces a newer one
+
+// Another user may log in next: nothing of this one stays on screen, and their choices are loaded again.
+export function resetOrderFilters() {
+  Object.assign(filters, { month: null, greenhouseId: '', status: '' })
   tags = new Map()
-  $('orders').replaceChildren(...orders.map((order) => orderRow(order, previous)))
-  $('orders-empty').hidden = orders.length > 0
-  $('orders-count').textContent = plural(orders.length, 'order')
+  for (const id of ['inbox', 'orders', 'filter-month']) $(id).replaceChildren()
+  $('inbox-section').hidden = true
+  $('orders-count').textContent = ''
 }
 
-function orderRow(order, previous) {
+// The history with the chosen filters, and the inbox: what this user may approve or receive now.
+export async function loadOrders(force = true) {
+  const request = ++latestRequest
+  if (!(await loadFilterChoices())) return
+  const asked = { ...filters }
+  const query = new URLSearchParams(Object.entries(asked).filter(([, value]) => value))
+  const [history, inbox] = await Promise.all([api('GET', `/api/orders?${query}`), api('GET', '/api/orders?inbox=true')])
+  if (request !== latestRequest || !history.ok || !inbox.ok || (!force && editing())) return
+  const previous = tags
+  tags = new Map()
+  const waiting = inbox.data.orders
+  $('inbox').replaceChildren(...waiting.map((order) => orderRow(order, previous, 'inbox')))
+  $('inbox-section').hidden = waiting.length === 0
+  $('inbox-count').textContent = plural(waiting.length, 'order')
+  // An order in the inbox has its buttons there only: two Approve buttons would race each other.
+  const inInbox = new Set(waiting.map((order) => order.id))
+  const orders = history.data.orders
+  $('orders').replaceChildren(...orders.map((order) => orderRow(order, previous, 'history', !inInbox.has(order.id))))
+  $('orders-count').textContent = plural(orders.length, 'order')
+  $('orders-empty').hidden = orders.length > 0
+  $('orders-empty').textContent =
+    asked.greenhouseId || asked.status
+      ? 'No orders match these filters.'
+      : `No orders in ${monthName(asked.month)}. The agent orders when a supply drops below its line.`
+}
+
+// The months and greenhouses to filter by, asked again on every load so a new month shows up on its own.
+// What is selected stays selected while it is still offered.
+async function loadFilterChoices() {
+  const res = await api('GET', '/api/orders/filters')
+  if (!res.ok) return filters.month !== null
+  const { months, greenhouses } = res.data
+  if (!months.includes(filters.month)) filters.month = months[0] ?? null
+  if (!greenhouses.some((greenhouse) => String(greenhouse.id) === filters.greenhouseId)) filters.greenhouseId = ''
+  $('filter-month').replaceChildren(...months.map((month) => h('option', { value: month }, monthName(month))))
+  $('filter-greenhouse').replaceChildren(
+    h('option', { value: '' }, 'All greenhouses'),
+    ...greenhouses.map((greenhouse) => h('option', { value: String(greenhouse.id) }, greenhouse.name))
+  )
+  $('filter-month').value = filters.month ?? ''
+  $('filter-greenhouse').value = filters.greenhouseId
+  $('filter-status').value = filters.status
+  $('filter-greenhouse-label').hidden = greenhouses.length < 2
+  updateExportLink()
+  return filters.month !== null
+}
+
+function updateExportLink() {
+  const query = new URLSearchParams({ month: filters.month ?? '' })
+  if (filters.greenhouseId) query.set('greenhouseId', filters.greenhouseId)
+  $('export').href = `/api/orders/export?${query}`
+  $('export').textContent = `Download ${monthName(filters.month)} purchase orders (CSV)`
+}
+
+for (const [id, key] of [
+  ['filter-month', 'month'],
+  ['filter-greenhouse', 'greenhouseId'],
+  ['filter-status', 'status']
+]) {
+  $(id).addEventListener('change', (event) => {
+    filters[key] = event.currentTarget.value
+    updateExportLink()
+    void loadOrders()
+  })
+}
+
+function orderRow(order, previous, list, withActions = true) {
   const tag = paymentTag(order.payment)
   if (tag) {
     const key = tag.dataset.state + tag.textContent
-    if (previous.has(order.id) && previous.get(order.id) !== key) tag.classList.add('changed')
-    tags.set(order.id, key)
+    const id = `${list}:${order.id}`
+    if (previous.has(id) && previous.get(id) !== key) tag.classList.add('changed')
+    tags.set(id, key)
   }
   return h(
     'li',
@@ -52,7 +122,7 @@ function orderRow(order, previous) {
       h('p', { class: 'order-reasoning' }, order.reasoning),
       delivery(order)
     ),
-    h('div', { class: 'order-money' }, h('span', { class: 'total' }, money(order.totalCents)), h('span', { class: 'approval' }, approval(order)), tag, actions(order))
+    h('div', { class: 'order-money' }, h('span', { class: 'total' }, money(order.totalCents)), h('span', { class: 'approval' }, approval(order)), tag, withActions ? actions(order) : null)
   )
 }
 

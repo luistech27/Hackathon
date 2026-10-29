@@ -1,7 +1,7 @@
 // The dashboard: login, the manager's PayPal connection, and the sections, which refresh themselves.
 import { loadRuns } from './agent.js'
 import { loadGreenhouses } from './greenhouses.js'
-import { loadOrders } from './orders.js'
+import { loadOrders, resetOrderFilters } from './orders.js'
 import { $, api, editing, flash, onReload, onSessionExpired, reloadAll, state, when } from './ui.js'
 
 const REFRESH_MS = 20_000 // payments settle and simulated sensors move in the background
@@ -22,14 +22,19 @@ async function boot() {
   const me = await api('GET', '/api/me')
   if (!me.ok) return showLogin()
   state.user = me.data.user
+  resetOrderFilters()
   showDashboard()
   await finishPayPalReturn()
   await Promise.all([loadCurrency(), loadPayPal()])
   await reloadAll()
 }
 
+// Nothing of the user who leaves stays on screen for whoever logs in next.
 function showLogin() {
   state.user = null
+  resetOrderFilters()
+  for (const id of ['greenhouses', 'runs']) $(id).replaceChildren()
+  for (const id of ['paypal', 'simulation']) $(id).hidden = true
   $('login').hidden = false
   $('dashboard').hidden = true
   $('who').hidden = true

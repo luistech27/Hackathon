@@ -4,21 +4,25 @@ import { sessionUser } from '../auth/session.ts'
 import type { Db } from '../db/client.ts'
 import type { Actor } from '../domain/permissions.ts'
 import { loadPayments, payOrder, type Payment } from '../payments/payments.ts'
+import { purchaseOrdersCsv } from '../orders/export.ts'
 import { MAX_ITEMS_PER_ORDER, MAX_PACKS_PER_ITEM } from '../orders/items.ts'
-import {
-  approveOrder,
-  listOrders,
-  ORDER_STATUSES,
-  rejectOrder,
-  type DecideError,
-  type DecideResult
-} from '../orders/orders.ts'
+import { listOrders, orderFilters } from '../orders/list.ts'
+import { approveOrder, ORDER_STATUSES, rejectOrder, type DecideError, type DecideResult } from '../orders/orders.ts'
 import { MAX_RECEIPT_NOTE_LENGTH, receiveOrder, type ReceiveError } from '../orders/receipt.ts'
 import type { PayPalSetup } from './payments.ts'
 import { fail, ok } from './response.ts'
-import { dbId, idParams } from './schemas.ts'
+import { dbId, idParams, idText, monthText } from './schemas.ts'
 
-const listQuery = z.object({ status: z.enum(ORDER_STATUSES).optional() })
+const listQuery = z
+  .object({
+    status: z.enum(ORDER_STATUSES).optional(),
+    greenhouseId: idText.optional(),
+    month: monthText.optional(),
+    inbox: z.literal('true').optional()
+  })
+  .strict()
+
+const exportQuery = z.object({ month: monthText, greenhouseId: idText.optional() }).strict()
 
 // What the operator writes about a delivery: one short line that other people read as plain text.
 const receiptNote = z
@@ -54,12 +58,32 @@ const RECEIVE_ERRORS: ErrorReplies<ReceiveError> = {
   invalid_receipt: { status: 400, message: 'List each item of the order once, with how many packs arrived' }
 }
 
-// The approval inbox and deliveries. Orders are created by the agent on the server, never through this API.
+// The order history, each user's inbox, approvals, deliveries and the accountant's export.
+// Orders are created by the agent on the server, never through this API.
 export function orderRoutes(app: FastifyInstance, db: Db, paypal: PayPalSetup | null): void {
   app.get('/api/orders', async (request, reply) => {
     const query = listQuery.safeParse(request.query)
-    if (!query.success) return reply.code(400).send(fail('Unknown order status'))
-    return ok({ orders: await listOrders(db, sessionUser(request), query.data.status) })
+    if (!query.success) {
+      return reply.code(400).send(fail('Filter by status, greenhouseId, month (2026-10) or inbox=true'))
+    }
+    const { inbox, ...filters } = query.data
+    return ok({ orders: await listOrders(db, sessionUser(request), { ...filters, inbox: inbox === 'true' }) })
+  })
+
+  app.get('/api/orders/filters', async (request) => ok(await orderFilters(db, sessionUser(request))))
+
+  // A CSV file of the month's purchase orders, limited to the greenhouses the user may see.
+  app.get('/api/orders/export', async (request, reply) => {
+    const query = exportQuery.safeParse(request.query)
+    if (!query.success) return reply.code(400).send(fail('Pick a month (2026-10) and, if you like, a greenhouseId'))
+    const { month, greenhouseId } = query.data
+    const csv = await purchaseOrdersCsv(db, sessionUser(request), { month, greenhouseId: greenhouseId ?? null })
+    const name = `purchase-orders-${month}${greenhouseId ? `-greenhouse-${greenhouseId}` : ''}.csv`
+    return reply
+      .type('text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="${name}"`)
+      .header('cache-control', 'no-store')
+      .send(csv)
   })
 
   app.post('/api/orders/:id/approve', (request, reply) => decide(request, reply, approveOrder))

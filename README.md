@@ -63,6 +63,10 @@ An order becomes a purchase order when it is approved, by the rules or by a pers
 
 Each delivery is confirmed once and recorded in the audit log, with what was ordered and what arrived.
 
+Everyone sees a **Waiting for you** inbox with only what they can act on now: approvals within their reach for the greenhouse manager and the manager, deliveries to confirm for the greenhouse staff. Purchasing never gets approvals. The **order history** filters by month, greenhouse and status, and every order keeps the agent's reasoning.
+
+For the accountant, **Download purchase orders (CSV)** exports the month's purchase orders, one row each with its PayPal payment and its delivery. The file opens in Excel or Google Sheets with accents intact, and no cell can run as a spreadsheet formula, even text written by the model or by purchasing. Months follow the company's calendar, the same month the budget counts the order in.
+
 ## Simulated sensors
 
 Greenhouse 1 gets its levels from the real ESP32. Greenhouses 2 and 3 have no hardware, so the server simulates their sensors: each supply uses stock at its own daily rate, with a reading every 5 minutes, and the agent treats them exactly like real ones. The dashboard draws every supply as a tank with a dashed line where the code asks Claude to restock.
@@ -90,6 +94,7 @@ Confirming a delivery to a simulated greenhouse refills its tank. The server nev
 - [x] Claude purchasing agent: forecasts each supply, picks offers and places orders through the matrix (`server/src/agent/`)
 - [x] PayPal payments: the manager connects PayPal once, approved orders are paid with the saved account (`server/src/payments/`)
 - [x] Purchase orders numbered on approval, and deliveries confirmed by the greenhouse (`server/src/orders/`)
+- [x] Inbox per role, order history with filters, and a monthly CSV of purchase orders for the accountant
 - [x] Dashboard, first part: login, PayPal connection, orders with their payment and delivery, approve, reject and confirm deliveries (`server/public/`)
 - [x] Dashboard: levels, days left and budget per greenhouse, what the agent decided, and simulated sensors for greenhouses without hardware (`server/src/simulation/`)
 

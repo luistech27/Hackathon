@@ -5,6 +5,7 @@ import {
   canApproveSuppliers,
   canRunAgent,
   canRunSimulation,
+  mayActOnOrders,
   canManageBudgets,
   canManageCatalog,
   canManagePayments,
@@ -146,6 +147,10 @@ describe('separation of duties', () => {
   it("lets only managers choose the PayPal account and retry its payments", () => {
     expect(everyone.map((actor) => canManagePayments(actor, COMPANY))).toEqual([false, false, false, true])
     expect(canManagePayments(manager, OTHER_COMPANY)).toBe(false)
+  })
+
+  it('gives everyone but purchasing orders to act on', () => {
+    expect(everyone.map(mayActOnOrders)).toEqual([true, true, false, true])
   })
 
   it('lets only managers move the simulated sensors and restart the demo', () => {

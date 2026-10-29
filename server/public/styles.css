@@ -53,6 +53,7 @@ h3 {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -267,6 +268,41 @@ button:disabled {
 
 .section-head h2 {
   font-size: var(--step-2);
+}
+
+/* Order history filters: a plain group, not a form, so the timed refresh keeps running. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.8rem 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.filters label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.filters select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+}
+
+.filters a {
+  display: inline-block;
+  margin-left: auto;
+  text-decoration: none;
+}
+
+/* The inbox: what waits for this user, marked like the pollen of a supply below its line. */
+.inbox .order {
+  border-left: 5px solid var(--pollen);
 }
 
 .orders {

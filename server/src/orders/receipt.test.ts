@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { openDb, type Db } from '../db/client.ts'
 import type { Actor } from '../domain/permissions.ts'
 import { resetDemo } from '../testing.ts'
-import { createOrder, listOrders, type CreatedOrder } from './orders.ts'
+import { listOrders } from './list.ts'
+import { createOrder, type CreatedOrder } from './orders.ts'
 import { receiveOrder, type ReceivedItem } from './receipt.ts'
 
 // Demo data: greenhouse 1 has operator 1 and greenhouse manager 2 ($500 limit); 3 is purchasing, 4 the manager.

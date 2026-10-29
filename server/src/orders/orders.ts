@@ -1,23 +1,9 @@
 import { recordAudit } from '../audit/audit.ts'
 import type { Db, Queryable } from '../db/client.ts'
 import { decideApproval, fitsBudget, type AgentMode, type ApprovalDecision, type Approver } from '../domain/approval.ts'
-import {
-  canApproveOrder,
-  canConfirmReceipt,
-  canViewAllGreenhouses,
-  canViewGreenhouse,
-  type Actor
-} from '../domain/permissions.ts'
-import { loadPayments, queuePayment, type Payment } from '../payments/payments.ts'
-import {
-  assertItemRequests,
-  deliveredInFull,
-  loadItems,
-  priceItems,
-  saveItems,
-  type ItemRequest,
-  type OrderItem
-} from './items.ts'
+import { canApproveOrder, canViewGreenhouse, type Actor } from '../domain/permissions.ts'
+import { queuePayment, type Payment } from '../payments/payments.ts'
+import { assertItemRequests, priceItems, saveItems, type ItemRequest, type OrderItem } from './items.ts'
 
 export type OrderStatus = 'pending_approval' | 'approved' | 'rejected'
 export const ORDER_STATUSES = ['pending_approval', 'approved', 'rejected'] as const satisfies readonly OrderStatus[]
@@ -99,11 +85,9 @@ export const ORDER_COLUMNS = `o.id, o.company_id, o.greenhouse_id, o.supplier_id
   o.status, o.required_approver, o.rule_reason, o.reasoning, o.requested_by, o.decided_by, o.created_at, o.decided_at,
   o.po_number, o.received_at, o.received_by, o.receipt_note`
 
-const LIST_LIMIT = 100 // shortcut: no pagination yet; the newest orders come first
 const MAX_REASONING_LENGTH = 500 // the model's text is shown to people: keep it short, and render it as text only
 const DELIVERY_GRACE_DAYS = 3 // an approved order is expected within its delivery time plus this
 const REJECTION_PAUSE_HOURS = 24 // after a rejection, by a person or by the rules, leave the product alone this long
-const DAY_MS = 24 * 60 * 60 * 1000
 
 // Runs the approval matrix and saves the order with its verdict, in one transaction with the greenhouse
 // locked: two orders made at the same time cannot both take the last of the budget.
@@ -202,57 +186,6 @@ export function approveOrder(db: Db, actor: Actor, orderId: number): Promise<Dec
 
 export function rejectOrder(db: Db, actor: Actor, orderId: number): Promise<DecideResult> {
   return decideOrder(db, actor, orderId, 'rejected')
-}
-
-export async function listOrders(db: Queryable, actor: Actor, status?: OrderStatus): Promise<OrderView[]> {
-  const seesAll = canViewAllGreenhouses(actor)
-  if (!seesAll && actor.greenhouseId === null) return [] // the schema forbids this; fail closed
-  const { rows } = await db.query<ListedRow>(
-    `SELECT ${ORDER_COLUMNS}, g.name AS greenhouse_name, s.name AS supplier_name,
-       ru.name AS requested_by_name, du.name AS decided_by_name, rcv.name AS received_by_name
-     FROM orders o
-     JOIN greenhouses g ON g.id = o.greenhouse_id
-     JOIN suppliers s ON s.id = o.supplier_id
-     LEFT JOIN users ru ON ru.id = o.requested_by
-     LEFT JOIN users du ON du.id = o.decided_by
-     LEFT JOIN users rcv ON rcv.id = o.received_by
-     WHERE o.company_id = $1 AND ($2::int IS NULL OR o.greenhouse_id = $2) AND ($3::text IS NULL OR o.status = $3)
-     ORDER BY o.created_at DESC, o.id DESC
-     LIMIT ${LIST_LIMIT}`,
-    [actor.companyId, seesAll ? null : actor.greenhouseId, status ?? null]
-  )
-  const orderIds = rows.map((row) => row.id)
-  const items = await loadItems(db, orderIds)
-  const payments = await loadPayments(db, orderIds)
-  return rows.map((row) => toView(actor, row, items.get(row.id) ?? [], payments.get(row.id) ?? null))
-}
-
-interface ListedRow extends OrderRow {
-  greenhouse_name: string
-  supplier_name: string
-  requested_by_name: string | null
-  decided_by_name: string | null
-  received_by_name: string | null
-}
-
-function toView(actor: Actor, row: ListedRow, items: OrderItem[], payment: Payment | null): OrderView {
-  const order = toOrder(row)
-  const approved = order.status === 'approved'
-  const longestDeliveryDays = Math.max(0, ...items.map((item) => item.leadTimeDays))
-  return {
-    ...order,
-    items,
-    greenhouseName: row.greenhouse_name,
-    supplierName: row.supplier_name,
-    requestedByName: row.requested_by_name,
-    decidedByName: row.decided_by_name,
-    receivedByName: row.received_by_name,
-    canDecide: order.status === 'pending_approval' && canApproveOrder(actor, toOrderToApprove(order)),
-    canReceive: approved && order.receivedAt === null && canConfirmReceipt(actor, order),
-    expectedAt: approved && order.decidedAt ? new Date(order.decidedAt.getTime() + longestDeliveryDays * DAY_MS) : null,
-    shortDelivery: order.receivedAt !== null && !deliveredInFull(items),
-    payment
-  }
 }
 
 // Locks the order's greenhouse, so no new order takes the budget while this one is being approved,
@@ -433,7 +366,7 @@ export function toOrder(row: OrderRow): Order {
   }
 }
 
-function toOrderToApprove(order: Order) {
+export function toOrderToApprove(order: Order) {
   return {
     companyId: order.companyId,
     greenhouseId: order.greenhouseId,

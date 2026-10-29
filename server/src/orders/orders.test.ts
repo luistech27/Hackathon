@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { openDb, type Db } from '../db/client.ts'
 import type { Actor } from '../domain/permissions.ts'
 import { addDollarOffers, dollarItems, resetDemo } from '../testing.ts'
-import { approveOrder, createOrder, listOrders, type NewOrder } from './orders.ts'
+import { listOrders } from './list.ts'
+import { approveOrder, createOrder, type NewOrder } from './orders.ts'
 
 // Demo data: company 1; greenhouses 1-3 with budgets of $1500, $1200 and $1000;
 // greenhouse 1 has a greenhouse manager with a $500 limit; suppliers 1-3; offers 1-5, where

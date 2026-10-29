@@ -239,6 +239,78 @@ describe('GET /api/orders', () => {
   })
 })
 
+describe('order history filters and inbox', () => {
+  let thisMonth: string
+
+  beforeEach(async () => {
+    const { rows } = await db.query<{ month: string }>(
+      `SELECT to_char(now() AT TIME ZONE 'America/Guayaquil', 'YYYY-MM') AS month`
+    )
+    thisMonth = rows[0]?.month ?? ''
+  })
+
+  it('filters by greenhouse and month', async () => {
+    await newOrder(9_000)
+    const theirs = await newOrder(9_000, { greenhouseId: 2 })
+
+    const res = await list(MANAGER, `?greenhouseId=2&month=${thisMonth}`)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data.orders.map((o: { id: number }) => o.id)).toEqual([theirs.id])
+  })
+
+  it('gives each user their inbox', async () => {
+    const delivery = await newOrder(9_000)
+    await newOrder(30_000, { supplierId: 2 })
+
+    const { orders } = (await list(OPERATOR, '?inbox=true')).json().data
+
+    expect(orders.map((o: { id: number }) => o.id)).toEqual([delivery.id])
+  })
+
+  it.each(['?month=2026-13', '?month=26-10', '?greenhouseId=abc', '?inbox=yes', '?page=2'])(
+    'answers 400 for %s',
+    async (query) => {
+      expect((await list(MANAGER, query)).statusCode).toBe(400)
+    }
+  )
+
+  it('lists the months and greenhouses to filter by', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/orders/filters', headers: { cookie: await loginAs(app, OPERATOR) } })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data).toEqual({ months: [thisMonth], greenhouses: [{ id: 1, name: 'Invernadero 1 · Tomate' }] })
+  })
+})
+
+describe('GET /api/orders/export', () => {
+  const download = async (query: string, cookie?: string) =>
+    app.inject({ method: 'GET', url: `/api/orders/export${query}`, headers: cookie ? { cookie } : {} })
+
+  it("downloads the month's purchase orders as a CSV file", async () => {
+    const order = await newOrder(9_000)
+    const { rows } = await db.query<{ month: string }>(
+      `SELECT to_char(now() AT TIME ZONE 'America/Guayaquil', 'YYYY-MM') AS month`
+    )
+    const month = rows[0]?.month ?? ''
+
+    const res = await download(`?month=${month}&greenhouseId=1`, await loginAs(app, MANAGER))
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('text/csv')
+    expect(res.headers['content-disposition']).toBe(`attachment; filename="purchase-orders-${month}-greenhouse-1.csv"`)
+    expect(res.body).toContain(order.poNumber ?? 'missing')
+  })
+
+  it.each(['', '?month=2026-1', '?month=2026-10&greenhouseId=0'])('answers 400 for %j', async (query) => {
+    expect((await download(query, await loginAs(app, MANAGER))).statusCode).toBe(400)
+  })
+
+  it('requires a session', async () => {
+    expect((await download('?month=2026-10')).statusCode).toBe(401)
+  })
+})
+
 describe('POST /api/orders/:id/receive', () => {
   const receive = async (email: string, orderId: number | string, payload: unknown) =>
     app.inject({

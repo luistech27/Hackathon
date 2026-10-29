@@ -150,8 +150,8 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 **7–9 nov · Dashboard y simulación**
 
 - [x] Vista por invernadero: niveles, días restantes, presupuesto usado
-- [ ] Bandeja de aprobaciones por rol, recepción e historial con razonamiento
-- [ ] Exportación CSV por invernadero y mes
+- [x] Bandeja de aprobaciones por rol, recepción e historial con razonamiento
+- [x] Exportación CSV por invernadero y mes
 - [x] Modo simulación con 3 invernaderos (deslizadores, adelantar 1 o 3 días, reiniciar demo)
 
 **10 nov · Pruebas y README**

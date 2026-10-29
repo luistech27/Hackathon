@@ -56,6 +56,12 @@ export function canConfirmReceipt(actor: Actor, greenhouse: GreenhouseRef): bool
   )
 }
 
+// Purchasing picks suppliers and prices, so it neither approves orders nor confirms their deliveries:
+// it has nothing waiting in an inbox.
+export function mayActOnOrders(actor: Actor): boolean {
+  return actor.role !== 'purchasing'
+}
+
 // Separation of duties: whoever manages suppliers and prices never approves payments to them.
 export function canManageCatalog(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'purchasing'

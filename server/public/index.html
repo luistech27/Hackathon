@@ -44,6 +44,14 @@
         <button type="button" class="primary" id="paypal-connect" hidden></button>
       </section>
 
+      <section id="inbox-section" class="inbox" aria-labelledby="inbox-title" hidden>
+        <div class="section-head">
+          <h2 id="inbox-title">Waiting for you</h2>
+          <p id="inbox-count" class="muted"></p>
+        </div>
+        <ol id="inbox" class="orders"></ol>
+      </section>
+
       <section aria-labelledby="greenhouses-title">
         <div class="section-head">
           <h2 id="greenhouses-title">Greenhouses</h2>
@@ -76,13 +84,28 @@
 
       <section aria-labelledby="orders-title">
         <div class="section-head">
-          <h2 id="orders-title">Orders</h2>
+          <h2 id="orders-title">Order history</h2>
           <p id="orders-count" class="muted"></p>
         </div>
+        <div class="filters" role="group" aria-label="Filter the order history">
+          <label>Month <select id="filter-month"></select></label>
+          <label id="filter-greenhouse-label">
+            Greenhouse
+            <select id="filter-greenhouse"><option value="">All greenhouses</option></select>
+          </label>
+          <label>
+            Status
+            <select id="filter-status">
+              <option value="">Any status</option>
+              <option value="pending_approval">Waiting for approval</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </label>
+          <a id="export" class="quiet" href="/api/orders/export" download>Download purchase orders (CSV)</a>
+        </div>
         <ol id="orders" class="orders"></ol>
-        <p id="orders-empty" class="empty" hidden>
-          No orders yet. The agent orders when a supply runs low and the budget allows it.
-        </p>
+        <p id="orders-empty" class="empty" hidden></p>
       </section>
     </main>
   </body>
