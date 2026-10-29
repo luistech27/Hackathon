@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify'
 const PUBLIC_DIR = new URL('../../public/', import.meta.url)
 
 const STYLES = ['styles.css', 'greenhouses.css']
-const SCRIPTS = ['app.js', 'ui.js', 'orders.js', 'greenhouses.js', 'agent.js']
+const SCRIPTS = ['app.js', 'ui.js', 'orders.js', 'greenhouses.js', 'agent.js', 'rules.js']
 const PAGES = [
   { url: '/', file: 'index.html', type: 'text/html; charset=utf-8' },
   ...STYLES.map((file) => ({ url: `/${file}`, file, type: 'text/css; charset=utf-8' })),

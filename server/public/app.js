@@ -2,6 +2,7 @@
 import { loadRuns } from './agent.js'
 import { loadGreenhouses } from './greenhouses.js'
 import { loadOrders, resetOrderFilters } from './orders.js'
+import { loadRules } from './rules.js'
 import { $, api, editing, flash, onReload, onSessionExpired, reloadAll, state, when } from './ui.js'
 
 const REFRESH_MS = 20_000 // payments settle and simulated sensors move in the background
@@ -13,6 +14,7 @@ const ROLES = {
   manager: 'Manager'
 }
 
+onReload(loadRules)
 onReload(loadGreenhouses)
 onReload(loadRuns)
 onReload(loadOrders)
@@ -34,7 +36,7 @@ function showLogin() {
   state.user = null
   resetOrderFilters()
   for (const id of ['greenhouses', 'runs']) $(id).replaceChildren()
-  for (const id of ['paypal', 'simulation']) $(id).hidden = true
+  for (const id of ['paypal', 'rules', 'simulation']) $(id).hidden = true
   $('login').hidden = false
   $('dashboard').hidden = true
   $('who').hidden = true

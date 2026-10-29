@@ -10,8 +10,6 @@ let page: Page
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage()
   await restartDemo(page)
-  const policy = await page.request.patch('/api/company/policy', { data: { agentMode: 'always_approve' } })
-  expect(policy.status()).toBe(200)
   await postReading(page, 'fertilizer', 4_000)
 })
 
@@ -21,6 +19,19 @@ test.afterAll(async () => {
   await postReading(page, 'fertilizer', 50_000)
   await restartDemo(page)
   await page.close()
+})
+
+test('the manager turns on approval mode from the dashboard', async () => {
+  const rules = page.getByRole('region', { name: 'Approval rules' })
+  await expect(rules).toContainText('The agent pays orders up to $100.00 on its own.')
+
+  await rules.getByRole('button', { name: 'Change rules' }).click()
+  await rules.getByLabel('Approval mode: ask a person before every order').check()
+  await expect(rules.getByLabel('Pay on its own up to (USD)')).toBeDisabled()
+  await rules.getByRole('button', { name: 'Save rules' }).click()
+
+  await expect(page.getByText(/^Approval rules saved\. Approval mode:/)).toBeVisible()
+  await expect(rules).toContainText('every order the agent places waits for a person')
 })
 
 test('in approval mode the order the agent places waits for a person', async () => {

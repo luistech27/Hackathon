@@ -156,7 +156,7 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 
 **10 nov · Pruebas y README**
 
-- [x] Pruebas E2E del flujo completo (Playwright, 13 recorridos con Claude y PayPal simulados)
+- [x] Pruebas E2E del flujo completo (Playwright, 15 recorridos con Claude y PayPal simulados)
 - [ ] README en inglés con instrucciones, usuarios de prueba y cuenta Sandbox
 
 **11 nov · Video y entrega**

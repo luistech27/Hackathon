@@ -24,6 +24,7 @@ describe('dashboard pages', () => {
     ['/orders.js', 'text/javascript'],
     ['/greenhouses.js', 'text/javascript'],
     ['/agent.js', 'text/javascript'],
+    ['/rules.js', 'text/javascript'],
     ['/styles.css', 'text/css'],
     ['/greenhouses.css', 'text/css']
   ])('serves %s without a session', async (url, type) => {

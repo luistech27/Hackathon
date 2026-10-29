@@ -30,6 +30,22 @@ test('shows the operator only their greenhouse, with no demo or money controls',
     await expect(page.getByRole('button', { name })).toHaveCount(0)
   }
   await expect(page.getByRole('slider')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Approval rules' })).toBeHidden()
+})
+
+test('lets the manager change what the agent pays on its own', async ({ page }) => {
+  await logIn(page, USERS.manager)
+  const rules = page.getByRole('region', { name: 'Approval rules' })
+
+  await rules.getByRole('button', { name: 'Change rules' }).click()
+  await rules.getByLabel('Pay on its own up to (USD)').fill('50')
+  await rules.getByRole('button', { name: 'Save rules' }).click()
+  await expect(rules).toContainText('The agent pays orders up to $50.00 on its own.')
+
+  await rules.getByRole('button', { name: 'Change rules' }).click()
+  await rules.getByLabel('Pay on its own up to (USD)').fill('100')
+  await rules.getByRole('button', { name: 'Save rules' }).click()
+  await expect(rules).toContainText('The agent pays orders up to $100.00 on its own.')
 })
 
 test('logging out leaves nothing of the last user on screen', async ({ page }) => {

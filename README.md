@@ -24,10 +24,11 @@ Log in as the manager.
 1. **Make a supply run low.** Invernadero 2 runs on simulated sensors. Drag the slider under its *Fertilizante NPK* tank down to about 10%. The tank turns yellow: it is below its dashed line, where the code asks Claude to restock.
 2. **Run the agent.** Press **Run the agent now** and wait about 15 seconds. Claude gets the forecast and the suppliers' offers and places an order; the code prices it from the catalog and runs it through the approval rules. Under $100 it is paid at once with PayPal: the order shows its purchase order number and PayPal's order id, and **What the agent decided** shows Claude's reasoning. A bigger order waits in **Waiting for you** for your approval instead.
 3. **Receive it.** In **Waiting for you**, press **Confirm delivery**. Lower a number if something did not arrive, and the order is marked as a short delivery. The tank refills with what arrived.
-4. **Hit the budget.** Under Invernadero 3, press **Change budget** and set it to 10. Drag its NPK tank down and run the agent again: nothing is bought, because even the cheapest order would go over the budget.
-5. **Get the month for the accountant.** Under **Order history**, download the CSV: purchase order, PayPal payment and delivery on one row.
-6. **Let time pass.** **Skip 3 days** makes the simulated greenhouses use three days of stock. The agent also runs on its own every 15 minutes.
-7. **Start over.** **Restart demo** deletes orders, payments and the audit log, and puts budgets, rules and stock back as they started.
+4. **Ask for approval.** Under **Approval rules**, press **Change rules** and turn on **Approval mode**. Drag the *Agua de riego* tank of Invernadero 3 down and run the agent: the order now waits in **Waiting for you**. Approve it and PayPal pays it.
+5. **Hit the budget.** Under Invernadero 3, press **Change budget** and set it to 10. Drag its NPK tank down and run the agent again: nothing is bought, because even the cheapest order would go over the budget.
+6. **Get the month for the accountant.** Under **Order history**, download the CSV: purchase order, PayPal payment and delivery on one row.
+7. **Let time pass.** **Skip 3 days** makes the simulated greenhouses use three days of stock. The agent also runs on its own every 15 minutes.
+8. **Start over.** **Restart demo** deletes orders, payments and the audit log, and puts budgets, rules and stock back as they started.
 
 Then log in as `operador@agroandes.test` to see the dashboard of someone who works in one greenhouse: only Invernadero 1, its deliveries, and no money controls. Invernadero 1 reads the real ESP32. When the device is offline, its tanks say when they last heard from it.
 
@@ -151,7 +152,7 @@ A real browser drives the dashboard through the main flows:
 - lowering a tank until the agent orders it, with PayPal paying right away;
 - confirming the delivery, which refills the tank;
 - a budget too small for any order stopping the agent;
-- a greenhouse manager approving an order;
+- the manager changing the approval rules, then a greenhouse manager approving an order;
 - an operator reporting a short delivery;
 - downloading the month's CSV.
 
