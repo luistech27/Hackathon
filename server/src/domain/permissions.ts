@@ -76,6 +76,11 @@ export function canRunAgent(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }
 
+// Which PayPal account pays, and trying a failed payment again: the manager's, like the budgets.
+export function canManagePayments(actor: Actor, companyId: number): boolean {
+  return sameCompany(actor, companyId) && actor.role === 'manager'
+}
+
 export function canViewAudit(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }

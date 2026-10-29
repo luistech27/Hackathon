@@ -139,12 +139,12 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 - [x] Login con los 4 roles y permisos revisados en el servidor
 - [x] Matriz de aprobación, anti-fraccionamiento y presupuesto por invernadero (TDD)
 - [x] Catálogo de proveedores de prueba (lo maneja Compras)
-- [ ] Agente con Claude: predicción, consolidación por proveedor, elección y razonamiento
+- [x] Agente con Claude: predicción, consolidación por proveedor, elección y razonamiento
 
 **4–6 nov · PayPal y órdenes de compra**
 
-- [ ] Guardar método de pago (Vault) desde el dashboard del gerente
-- [ ] Compra automática con `vault_id` y compra tras aprobación
+- [x] Guardar método de pago (Vault) desde el dashboard del gerente
+- [x] Compra automática con `vault_id` y compra tras aprobación (probado en Sandbox el 29 oct)
 - [ ] Órdenes de compra numeradas, recepción por el operador y registro de auditoría
 
 **7–9 nov · Dashboard y simulación**

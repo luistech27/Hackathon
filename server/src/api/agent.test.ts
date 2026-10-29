@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from '../agent/agent.ts'
 import { buildApp } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
-import { loginAs, resetDemo } from '../testing.ts'
+import { connectPayPal, fakePayPal, loginAs, resetDemo } from '../testing.ts'
 
 let db: Db
 let app: FastifyInstance
@@ -68,6 +68,38 @@ describe('POST /api/agent/run', () => {
       'nothing_needed'
     ])
     expect(claudeCalls).toBe(2)
+  })
+
+  it('pays right away what the rules let the agent pay on its own', async () => {
+    await npkRunningLow()
+    await connectPayPal(db)
+    const paypal = fakePayPal()
+    const replies = [
+      [{ type: 'tool_use', id: 'call_1', name: 'place_order', input: { supplierId: 1, items: [{ offerId: 1, packs: 2 }], reasoning: 'NPK lasts 4 days.' } }],
+      [{ type: 'text', text: 'Ordered NPK.' }]
+    ]
+    const buyingClaude: AgentConfig = {
+      model: 'claude-opus-5-5',
+      createMessage: async () =>
+        ({
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-opus-5-5',
+          content: replies.shift(),
+          stop_reason: replies.length === 1 ? 'tool_use' : 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 5 }
+        }) as unknown as Anthropic.Beta.Messages.BetaMessage
+    }
+    const withPayPal = await buildApp(db, { agent: buyingClaude, paypal: { client: paypal.paypal, publicUrl: 'https://x.example' } })
+    const cookie = await loginAs(withPayPal, 'gerente@agroandes.test')
+
+    const res = await withPayPal.inject({ method: 'POST', url: '/api/agent/run', headers: { cookie } })
+    await withPayPal.close()
+
+    expect(res.json().data.runs[0]).toMatchObject({ outcome: 'ordered' })
+    expect(paypal.charges).toEqual([expect.objectContaining({ amountCents: 6_400 })])
   })
 
   it.each(['operador@agroandes.test', 'encargado@agroandes.test', 'compras@agroandes.test'])(

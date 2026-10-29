@@ -29,6 +29,14 @@ services:
       # service, add it by hand under Environment. Without it the agent stays off.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Same as above: add these two by hand on the existing service. Without them approved orders wait unpaid.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com # Sandbox: no real money moves
+      # PayPal sends the manager back to RENDER_EXTERNAL_URL, which Render sets on its own.
 
 databases:
   - name: invernadero-db

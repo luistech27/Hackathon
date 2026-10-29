@@ -6,6 +6,7 @@ import {
   canRunAgent,
   canManageBudgets,
   canManageCatalog,
+  canManagePayments,
   canViewAudit,
   canViewAllGreenhouses,
   canViewGreenhouse,
@@ -139,6 +140,11 @@ describe('separation of duties', () => {
   it('lets only managers start the agent by hand', () => {
     expect(everyone.map((actor) => canRunAgent(actor, COMPANY))).toEqual([false, false, false, true])
     expect(canRunAgent(manager, OTHER_COMPANY)).toBe(false)
+  })
+
+  it("lets only managers choose the PayPal account and retry its payments", () => {
+    expect(everyone.map((actor) => canManagePayments(actor, COMPANY))).toEqual([false, false, false, true])
+    expect(canManagePayments(manager, OTHER_COMPANY)).toBe(false)
   })
 
   it("shows only managers their company's audit log", () => {

@@ -321,7 +321,7 @@ async function recordRun(
       snapshot.companyId,
       snapshot.greenhouseId,
       run.outcome,
-      run.summary.replaceAll(' ', '').slice(0, MAX_SUMMARY_LENGTH), // Postgres text cannot hold NUL
+      run.summary.replaceAll('\u0000', '').slice(0, MAX_SUMMARY_LENGTH), // Postgres text cannot hold NUL
       run.orderIds,
       run.model,
       run.usage.input,

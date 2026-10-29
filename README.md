@@ -39,6 +39,20 @@ The amounts are examples the manager can change. On top of the matrix:
 - **New suppliers need the manager:** purchasing can add a supplier, but the agent cannot buy from it until a manager approves it, so nobody can create a supplier and send it orders on their own.
 - **Everything is on record:** every order, approval, budget, rule, supplier and price change goes into an audit log (`GET /api/audit`, manager only) in the same transaction as the change, with who, when, and the before and after.
 
+## How orders are paid
+
+The manager connects the company's PayPal account once from the dashboard ([PayPal Vault](https://developer.paypal.com/api/payment-tokens/save-without-purchase/paypal), without a purchase). After that, every approved order is paid from it with nobody present: an order the rules paid on their own right away, an order a person approved the moment they approve it. Each payment keeps PayPal's order and capture ids as proof.
+
+- **Never charged twice:** each payment has its own `PayPal-Request-Id`. If PayPal does not answer, it is asked again with the same id, so PayPal returns the first result instead of charging again; once PayPal has an order for a payment, it is only looked up, never charged again. Two servers or two clicks cannot pay the same order at once.
+- **Nothing is lost:** approving and queueing the payment happen in one transaction, and a background round every 30 seconds pays whatever is still waiting (PayPal not connected yet, a restart, PayPal down).
+- **Only this company's account:** connecting finishes with the setup this company started, never an id sent by the browser, and only the manager can connect PayPal or retry a failed payment.
+- **When nobody knows, nobody resends:** if PayPal never confirmed an attempt, the same request is only sent again within an hour (PayPal does not say how long it remembers one); after that the payment waits for the manager to check PayPal. A request that never reached PayPal (PayPal down, or refusing the app's credentials) just waits in the queue.
+- **The code moves the money, not the model:** Claude never sees PayPal; it only proposes orders.
+
+The money goes to the PayPal business account of this app's credentials, which stands in for the suppliers in the demo; paying each supplier's own PayPal account would need PayPal's platform (partner) onboarding.
+
+Without `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` everything else works and approved orders wait unpaid.
+
 ## Status
 
 - [x] Decision logic: consumption forecast, supplier choice, budget rules (`server/src/domain/`)
@@ -51,7 +65,9 @@ The amounts are examples the manager can change. On top of the matrix:
 - [x] Supplier catalog managed by purchasing, new suppliers approved by the manager; every order is priced from it and keeps the price of the moment
 - [x] Audit log of orders, approvals, budgets, rules and catalog changes
 - [x] Claude purchasing agent: forecasts each supply, picks offers and places orders through the matrix (`server/src/agent/`)
-- [ ] PayPal integration, dashboard with simulation mode
+- [x] PayPal payments: the manager connects PayPal once, approved orders are paid with the saved account (`server/src/payments/`)
+- [x] Dashboard, first part: login, PayPal connection, orders with their payment, approve and reject (`server/public/`)
+- [ ] Dashboard: levels, budgets and simulation mode
 
 ## Firmware
 
@@ -81,7 +97,7 @@ npm install
 npm run dev
 ```
 
-Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
+Open http://localhost:3000 for the dashboard. Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
 
 ### Demo users
 
@@ -99,7 +115,7 @@ All four use the password set in `DEMO_PASSWORD`.
 `render.yaml` describes the server and a private Postgres database.
 
 1. In the Render Dashboard choose **New > Blueprint** and pick this repository.
-2. When asked, enter `DEVICE_API_KEY` (the same value as the ESP32's `secrets.h`) and `DEMO_PASSWORD`.
+2. When asked, enter `DEVICE_API_KEY` (the same value as the ESP32's `secrets.h`), `DEMO_PASSWORD`, and optionally `ANTHROPIC_API_KEY`, `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
 3. Apply. Every push to `main` redeploys the server.
 
 Then point the ESP32 at it: set `SERVER_URL` in `secrets.h` to the service's `https://….onrender.com` address and upload the sketch again.

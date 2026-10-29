@@ -2,6 +2,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Db } from './db/client.ts'
 import { seedDemo } from './db/seed.ts'
+import type { ChargeRequest, PayPal, PayPalPayment, SavedAccount } from './paypal/client.ts'
 
 export const TEST_DEVICE_KEY = 'test-device-key-1234567890'
 export const TEST_PASSWORD = 'test-password-123'
@@ -24,6 +25,63 @@ export async function addDollarOffers(db: Db): Promise<Map<number, number>> {
 
 export function dollarItems(offers: Map<number, number>, supplierId: number, totalCents: number) {
   return [{ offerId: offers.get(supplierId) ?? 0, packs: totalCents / 100 }]
+}
+
+// A PayPal that pays everything unless told otherwise. Each answer is used once, in order.
+export function fakePayPal() {
+  const state = {
+    charges: [] as ChargeRequest[],
+    lookups: [] as string[],
+    savedTokens: [] as string[],
+    setups: 0,
+    returnUrls: [] as string[],
+    chargeAnswers: [] as Array<PayPalPayment | Error | Promise<PayPalPayment>>,
+    lookupAnswers: [] as Array<PayPalPayment | Error>,
+    saveAnswer: { vaultId: 'vault-test', customerId: 'customer-test', payerEmail: 'pagos@agroandes.test' } as
+      | SavedAccount
+      | Error
+  }
+  const paypal: PayPal = {
+    async createSetupToken({ returnUrl }) {
+      state.setups += 1
+      state.returnUrls.push(returnUrl)
+      return { id: `SETUP${state.setups}`, approveUrl: `https://www.sandbox.paypal.com/approve?token=SETUP${state.setups}` }
+    },
+    async saveAccount(setupTokenId) {
+      state.savedTokens.push(setupTokenId)
+      if (state.saveAnswer instanceof Error) throw state.saveAnswer
+      return state.saveAnswer
+    },
+    async charge(request) {
+      state.charges.push(request)
+      const answer = state.chargeAnswers.shift() ?? paidAtPayPal(`PAYPAL${state.charges.length}`)
+      if (answer instanceof Error) throw answer
+      return answer
+    },
+    async getPayment(orderId) {
+      state.lookups.push(orderId)
+      const answer = state.lookupAnswers.shift() ?? paidAtPayPal(orderId)
+      if (answer instanceof Error) throw answer
+      return answer
+    }
+  }
+  return Object.assign(state, { paypal })
+}
+
+export const paidAtPayPal = (orderId: string, captureStatus = 'COMPLETED'): PayPalPayment => ({
+  orderId,
+  orderStatus: 'COMPLETED',
+  captureId: `CAPTURE-${orderId}`,
+  captureStatus
+})
+
+// As if the manager had already saved the company's PayPal account.
+export async function connectPayPal(db: Db, companyId = 1): Promise<void> {
+  await db.query(
+    `INSERT INTO paypal_accounts (company_id, vault_id, payer_email, connected_at) VALUES ($1, 'vault-test', 'pagos@agroandes.test', now())
+     ON CONFLICT (company_id) DO UPDATE SET vault_id = 'vault-test', connected_at = now()`,
+    [companyId]
+  )
 }
 
 // Logs in and returns the Cookie header to send with later requests.

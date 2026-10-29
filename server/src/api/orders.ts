@@ -1,8 +1,9 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { sessionUser } from '../auth/session.ts'
 import type { Db } from '../db/client.ts'
 import type { Actor } from '../domain/permissions.ts'
+import { loadPayments, payOrder, type Payment } from '../payments/payments.ts'
 import {
   approveOrder,
   listOrders,
@@ -11,6 +12,7 @@ import {
   type DecideError,
   type DecideResult
 } from '../orders/orders.ts'
+import type { PayPalSetup } from './payments.ts'
 import { fail, ok } from './response.ts'
 import { idParams } from './schemas.ts'
 
@@ -25,7 +27,7 @@ const DECIDE_ERRORS: Record<DecideError, { status: number; message: string }> = 
 }
 
 // The approval inbox. Orders are created by the agent on the server, never through this API.
-export function orderRoutes(app: FastifyInstance, db: Db): void {
+export function orderRoutes(app: FastifyInstance, db: Db, paypal: PayPalSetup | null): void {
   app.get('/api/orders', async (request, reply) => {
     const query = listQuery.safeParse(request.query)
     if (!query.success) return reply.code(400).send(fail('Unknown order status'))
@@ -47,6 +49,18 @@ export function orderRoutes(app: FastifyInstance, db: Db): void {
       const error = DECIDE_ERRORS[result.error]
       return reply.code(error.status).send(fail(error.message))
     }
-    return ok({ order: result.order })
+    return ok({ order: result.order, payment: await payNow(result.order.id, request.log) })
+  }
+
+  // An approved order is paid right away when PayPal is set up; the background round covers the rest.
+  async function payNow(orderId: number, log: FastifyBaseLogger): Promise<Payment | null> {
+    if (!paypal) return (await loadPayments(db, [orderId])).get(orderId) ?? null
+    try {
+      return await payOrder(db, paypal.client, orderId, log)
+    } catch (error) {
+      // The approval is already saved: answer with it, whatever happened to the payment.
+      log.error({ err: error, orderId }, 'Paying right after the approval failed; the background round will retry')
+      return (await loadPayments(db, [orderId]).catch(() => null))?.get(orderId) ?? null
+    }
   }
 }

@@ -11,6 +11,8 @@ import { companyRoutes } from './api/company.ts'
 import { greenhouseRoutes } from './api/greenhouses.ts'
 import { healthRoutes } from './api/health.ts'
 import { orderRoutes } from './api/orders.ts'
+import { pageRoutes } from './api/pages.ts'
+import { paymentRoutes, type PayPalSetup } from './api/payments.ts'
 import { readingsRoutes } from './api/readings.ts'
 import { fail } from './api/response.ts'
 import { requireSessions } from './auth/session.ts'
@@ -21,21 +23,40 @@ export { LOGIN_ATTEMPTS_PER_MINUTE } from './api/auth.ts'
 const BODY_LIMIT_BYTES = 4 * 1024 // a real readings body is well under 1 KB
 export const RATE_LIMIT_PER_MINUTE = 60
 
+// The dashboard's own files and Google Fonts only; no inline scripts, never inside a frame.
+const CSP = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  styleSrc: ["'self'", 'https://fonts.googleapis.com'],
+  fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+  imgSrc: ["'self'", 'data:'],
+  connectSrc: ["'self'"],
+  formAction: ["'self'"],
+  frameAncestors: ["'none'"],
+  baseUri: ["'self'"],
+  objectSrc: ["'none'"],
+  upgradeInsecureRequests: null // Render is HTTPS with HSTS already; this would break plain http on localhost
+}
+
 export interface AppOptions {
   logger?: boolean
   // Proxies in front of the server (Render's, by default one). Each one appends to X-Forwarded-For,
   // so request.ip is read that many entries from the right, where a client cannot write.
   trustedProxyHops?: number
   agent?: AgentConfig | null // null or missing: no Claude API key, so the agent cannot be run
+  paypal?: PayPalSetup | null // null or missing: no PayPal credentials, so approved orders wait unpaid
 }
 
-export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1, agent = null }: AppOptions = {}): Promise<FastifyInstance> {
+export async function buildApp(
+  db: Db,
+  { logger = false, trustedProxyHops = 1, agent = null, paypal = null }: AppOptions = {}
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger && { serializers: { req: requestLog } },
     bodyLimit: BODY_LIMIT_BYTES,
     trustProxy: (_address, hop) => hop < trustedProxyHops
   })
-  await app.register(helmet)
+  await app.register(helmet, { contentSecurityPolicy: { directives: CSP } })
   await app.register(rateLimit, { max: RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' })
   await app.register(cookie)
   requireSessions(app, db)
@@ -55,23 +76,26 @@ export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1, a
   })
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(fail('Not found')))
 
-  agentRoutes(app, db, agent)
+  agentRoutes(app, db, agent, paypal)
   auditRoutes(app, db)
   authRoutes(app, db)
   catalogRoutes(app, db)
   companyRoutes(app, db)
   greenhouseRoutes(app, db)
   healthRoutes(app)
-  orderRoutes(app, db)
+  orderRoutes(app, db, paypal)
+  await pageRoutes(app)
+  paymentRoutes(app, db, paypal)
   readingsRoutes(app, db)
   return app
 }
 
 // The full proxy chain is logged so the number of trusted hops can be checked against real traffic.
+// The query string is not: PayPal's return to the dashboard carries tokens in it.
 function requestLog(request: FastifyRequest) {
   return {
     method: request.method,
-    url: request.url,
+    url: request.url.split('?')[0],
     remoteAddress: request.ip,
     forwardedFor: request.headers['x-forwarded-for']
   }

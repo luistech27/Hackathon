@@ -4,6 +4,8 @@ import { runAgentForCompany } from '../agent/scheduler.ts'
 import { sessionUser } from '../auth/session.ts'
 import type { Db } from '../db/client.ts'
 import { canRunAgent, canViewAllGreenhouses } from '../domain/permissions.ts'
+import { payDuePayments } from '../payments/payments.ts'
+import type { PayPalSetup } from './payments.ts'
 import { fail, ok } from './response.ts'
 
 const MANUAL_RUNS_PER_MINUTE = 3 // every run may call Claude, which costs money
@@ -23,14 +25,21 @@ interface RunRow {
   finished_at: Date
 }
 
-// agent is null when no Claude API key is configured.
-export function agentRoutes(app: FastifyInstance, db: Db, agent: AgentConfig | null): void {
+// agent is null when no Claude API key is configured, paypal when there are no PayPal credentials.
+export function agentRoutes(app: FastifyInstance, db: Db, agent: AgentConfig | null, paypal: PayPalSetup | null): void {
   const config = { rateLimit: { max: MANUAL_RUNS_PER_MINUTE, timeWindow: '1 minute' } }
   app.post('/api/agent/run', { config }, async (request, reply) => {
     const user = sessionUser(request)
     if (!canRunAgent(user, user.companyId)) return reply.code(403).send(fail('Only a manager can run the agent'))
     if (!agent) return reply.code(503).send(fail('The agent is not configured: ANTHROPIC_API_KEY is missing'))
-    return ok({ runs: await runAgentForCompany(db, agent, user.companyId, { force: true, log: request.log }) })
+    const runs = await runAgentForCompany(db, agent, user.companyId, { force: true, log: request.log })
+    // What the rules paid on their own is paid now, so the manager sees it; the background round would anyway.
+    if (paypal) {
+      await payDuePayments(db, paypal.client, { companyId: user.companyId, log: request.log }).catch((error: unknown) =>
+        request.log.error({ err: error }, 'Paying after the agent run failed; the background round will retry')
+      )
+    }
+    return ok({ runs })
   })
 
   // What the agent did and why, scoped like the greenhouses themselves.

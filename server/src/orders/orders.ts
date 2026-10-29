@@ -2,6 +2,7 @@ import { recordAudit } from '../audit/audit.ts'
 import type { Db, Queryable } from '../db/client.ts'
 import { decideApproval, fitsBudget, type AgentMode, type ApprovalDecision, type Approver } from '../domain/approval.ts'
 import { canApproveOrder, canViewAllGreenhouses, canViewGreenhouse, type Actor } from '../domain/permissions.ts'
+import { loadPayments, queuePayment, type Payment } from '../payments/payments.ts'
 import { assertItemRequests, loadItems, priceItems, saveItems, type ItemRequest, type OrderItem } from './items.ts'
 
 export type OrderStatus = 'pending_approval' | 'approved' | 'rejected'
@@ -44,6 +45,7 @@ export interface OrderView extends CreatedOrder {
   requestedByName: string | null // null: the agent
   decidedByName: string | null // null: the rules, or nobody yet
   canDecide: boolean // whether the user asking may approve or reject it now
+  payment: Payment | null // null: not approved (or approved before payments existed)
 }
 
 export type DecideError = 'not_found' | 'forbidden' | 'not_pending' | 'over_budget' | 'unavailable'
@@ -144,6 +146,7 @@ export async function createOrder(db: Db, order: NewOrder): Promise<CreatedOrder
     )
     const created = toOrder(firstRow(inserted.rows))
     await saveItems(tx, created.id, items)
+    if (created.status === 'approved') await queuePayment(tx, created.id)
     await recordAudit(tx, {
       companyId: created.companyId,
       userId: created.requestedBy,
@@ -188,10 +191,9 @@ export async function listOrders(db: Queryable, actor: Actor, status?: OrderStat
      LIMIT ${LIST_LIMIT}`,
     [actor.companyId, seesAll ? null : actor.greenhouseId, status ?? null]
   )
-  const items = await loadItems(
-    db,
-    rows.map((row) => row.id)
-  )
+  const orderIds = rows.map((row) => row.id)
+  const items = await loadItems(db, orderIds)
+  const payments = await loadPayments(db, orderIds)
   return rows.map((row) => {
     const order = toOrder(row)
     return {
@@ -201,7 +203,8 @@ export async function listOrders(db: Queryable, actor: Actor, status?: OrderStat
       supplierName: row.supplier_name,
       requestedByName: row.requested_by_name,
       decidedByName: row.decided_by_name,
-      canDecide: order.status === 'pending_approval' && canApproveOrder(actor, toOrderToApprove(order))
+      canDecide: order.status === 'pending_approval' && canApproveOrder(actor, toOrderToApprove(order)),
+      payment: payments.get(order.id) ?? null
     }
   })
 }
@@ -245,6 +248,7 @@ async function decideOrder(
     )
     const decided = updated.rows[0]
     if (!decided) return failed('not_pending')
+    if (outcome === 'approved') await queuePayment(tx, order.id)
     await recordAudit(tx, {
       companyId: order.companyId,
       userId: actor.id,

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Greenhouse purchasing</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="mark" href="/">Greenhouse purchasing</a>
+      <div class="who" id="who" hidden>
+        <span id="who-name"></span>
+        <span class="role" id="who-role"></span>
+        <button type="button" class="quiet" id="logout">Log out</button>
+      </div>
+    </header>
+
+    <p class="flash" id="flash" role="status" aria-live="polite" hidden></p>
+
+    <main id="login" class="login" hidden>
+      <h1>Supplies that reorder themselves, inside the budget you set.</h1>
+      <form id="login-form" class="login-form">
+        <label>Email <input name="email" type="email" autocomplete="username" required /></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit" class="primary">Log in</button>
+        <p class="hint">Demo users are listed in the project README.</p>
+      </form>
+    </main>
+
+    <main id="dashboard" class="dashboard" hidden>
+      <section id="paypal" class="paypal" hidden aria-labelledby="paypal-title">
+        <h2 id="paypal-title">Paying suppliers</h2>
+        <p id="paypal-text"></p>
+        <button type="button" class="primary" id="paypal-connect" hidden></button>
+      </section>
+
+      <section aria-labelledby="orders-title">
+        <div class="section-head">
+          <h2 id="orders-title">Orders</h2>
+          <p id="orders-count" class="muted"></p>
+        </div>
+        <ol id="orders" class="orders"></ol>
+        <p id="orders-empty" class="empty" hidden>
+          No orders yet. The agent orders when a supply runs low and the budget allows it.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

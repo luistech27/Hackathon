@@ -210,3 +210,48 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 -- The delivery time promised when the order was made, so later catalog edits cannot change it.
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS lead_time_days INTEGER NOT NULL DEFAULT 0 CHECK (lead_time_days >= 0);
+
+-- The PayPal account that pays the company's approved orders, saved once by the manager (PayPal Vault).
+-- vault_id charges that account, but only together with this app's own PayPal credentials.
+CREATE TABLE IF NOT EXISTS paypal_accounts (
+  company_id INTEGER PRIMARY KEY REFERENCES companies(id),
+  vault_id TEXT,
+  customer_id TEXT,
+  payer_email TEXT,
+  connected_by INTEGER,
+  connected_at TIMESTAMPTZ,
+  setup_token_id TEXT, -- a connection the manager started at PayPal and has not finished yet
+  setup_state TEXT, -- one-time value in PayPal's return link: only that link can finish the connection
+  setup_started_by INTEGER,
+  setup_started_at TIMESTAMPTZ,
+  FOREIGN KEY (company_id, connected_by) REFERENCES users (company_id, id),
+  FOREIGN KEY (company_id, setup_started_by) REFERENCES users (company_id, id),
+  CHECK ((vault_id IS NULL) = (connected_at IS NULL)),
+  CHECK ((setup_token_id IS NULL) = (setup_started_at IS NULL)),
+  CHECK ((setup_token_id IS NULL) = (setup_state IS NULL))
+);
+
+-- One payment per approved order, made in the background with the saved PayPal account.
+CREATE TABLE IF NOT EXISTS payments (
+  order_id INTEGER PRIMARY KEY REFERENCES orders(id),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  currency CHAR(3) NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'processing', 'pending', 'paid', 'failed')),
+  -- PayPal-Request-Id: kept while an attempt's outcome is unknown, so asking again never charges twice.
+  request_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  -- When an attempt first may have reached PayPal without an answer: from then on the request id never
+  -- changes, and past the time PayPal surely remembers it, nothing is sent again without a person.
+  maybe_sent_at TIMESTAMPTZ,
+  tries INTEGER NOT NULL DEFAULT 0 CHECK (tries >= 0),
+  claim_id UUID, -- the worker paying it now; one whose claim was taken over cannot write its result
+  claimed_at TIMESTAMPTZ,
+  paypal_order_id TEXT, -- once PayPal has an order, it is only looked up again, never charged again
+  capture_id TEXT,
+  paypal_status TEXT,
+  error TEXT CHECK (char_length(error) <= 64), -- a code, never PayPal's free text
+  queued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  paid_at TIMESTAMPTZ,
+  CHECK ((status = 'paid') = (paid_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS payments_due ON payments (queued_at) WHERE status IN ('queued', 'processing', 'pending');
