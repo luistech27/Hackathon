@@ -52,6 +52,19 @@ test('confirming the delivery refills the simulated tank', async () => {
   await expect(page.locator('[data-supply="3"] .tank-amount')).toHaveText('50 kg of 50 kg')
 })
 
+test('a budget too small for any order stops the agent from buying', async () => {
+  const greenhouse = page.locator('.greenhouse', { hasText: 'Invernadero 3 · Rosas' })
+  await greenhouse.getByRole('button', { name: 'Change budget' }).click()
+  await greenhouse.getByLabel('Monthly budget in USD').fill('10')
+  await greenhouse.getByRole('button', { name: 'Save budget' }).click()
+  await expect(page.getByText('Invernadero 3 · Rosas: budget set to $10.00 a month.')).toBeVisible()
+  await setSlider(page.locator('[data-supply="6"]').getByRole('slider'), 5_000)
+
+  await page.getByRole('button', { name: 'Run the agent now' }).click()
+
+  await expect(page.getByText('Not enough budget left this month for any order of what needs restocking')).toBeVisible()
+})
+
 test("the month's CSV lists the purchase order with its payment and delivery", async () => {
   const download = page.waitForEvent('download')
   await page.getByRole('link', { name: /^Download .* purchase orders \(CSV\)$/ }).click()

@@ -156,7 +156,7 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 
 **10 nov · Pruebas y README**
 
-- [x] Pruebas E2E del flujo completo (Playwright, 12 recorridos con Claude y PayPal simulados)
+- [x] Pruebas E2E del flujo completo (Playwright, 13 recorridos con Claude y PayPal simulados)
 - [ ] README en inglés con instrucciones, usuarios de prueba y cuenta Sandbox
 
 **11 nov · Video y entrega**
@@ -192,7 +192,7 @@ Usar música libre de derechos o ninguna. Narración en inglés o subtítulos en
 
 - [ ] Repo público con LICENSE visible y README en inglés
 - [ ] URL del demo hospedado funcionando en modo simulación
-- [ ] Usuarios de prueba por rol y cuenta Sandbox en el README
+- [x] Usuarios de prueba por rol y recorrido para jueces en el README (PayPal Sandbox ya conectado)
 - [ ] Video público en YouTube, menos de 3 min
 - [ ] Descripción en Devpost: problema, funciones, IA usada y cómo
 - [ ] Sin claves secretas en el repo (variables de entorno en Render)

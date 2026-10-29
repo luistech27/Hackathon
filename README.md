@@ -4,7 +4,34 @@ An ESP32 greenhouse that restocks itself. An AI agent (Claude) watches fertilize
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) 2026.
 
-> Work in progress.
+## Try it
+
+The demo runs at **https://invernadero-api-jn3j.onrender.com** on PayPal Sandbox, so no real money moves. All four users share the password **`greenhouse-demo-yfny9v86`**.
+
+| Log in as | Role | What they can do |
+| --- | --- | --- |
+| `gerente@agroandes.test` | Manager | Everything: budgets, approvals, PayPal, the agent and the simulation |
+| `encargado@agroandes.test` | Greenhouse manager of Invernadero 1 | Approve its orders up to $500 and confirm its deliveries |
+| `operador@agroandes.test` | Operator of Invernadero 1 | See its tanks and confirm its deliveries |
+| `compras@agroandes.test` | Purchasing | See every greenhouse and order, never approve or receive |
+
+You do not need a PayPal account: the demo company's PayPal Sandbox account is already connected, so approved orders are paid without anyone signing in to PayPal. To try connecting one yourself, press **Use another PayPal account** as the manager and sign in with a Sandbox personal account from your own [PayPal Developer dashboard](https://developer.paypal.com/dashboard/accounts). That account then pays the next orders.
+
+### A five-minute tour
+
+Log in as the manager.
+
+1. **Make a supply run low.** Invernadero 2 runs on simulated sensors. Drag the slider under its *Fertilizante NPK* tank down to about 10%. The tank turns yellow: it is below its dashed line, where the code asks Claude to restock.
+2. **Run the agent.** Press **Run the agent now** and wait about 15 seconds. Claude gets the forecast and the suppliers' offers and places an order; the code prices it from the catalog and runs it through the approval rules. Under $100 it is paid at once with PayPal: the order shows its purchase order number and PayPal's order id, and **What the agent decided** shows Claude's reasoning. A bigger order waits in **Waiting for you** for your approval instead.
+3. **Receive it.** In **Waiting for you**, press **Confirm delivery**. Lower a number if something did not arrive, and the order is marked as a short delivery. The tank refills with what arrived.
+4. **Hit the budget.** Under Invernadero 3, press **Change budget** and set it to 10. Drag its NPK tank down and run the agent again: nothing is bought, because even the cheapest order would go over the budget.
+5. **Get the month for the accountant.** Under **Order history**, download the CSV: purchase order, PayPal payment and delivery on one row.
+6. **Let time pass.** **Skip 3 days** makes the simulated greenhouses use three days of stock. The agent also runs on its own every 15 minutes.
+7. **Start over.** **Restart demo** deletes orders, payments and the audit log, and puts budgets, rules and stock back as they started.
+
+Then log in as `operador@agroandes.test` to see the dashboard of someone who works in one greenhouse: only Invernadero 1, its deliveries, and no money controls. Invernadero 1 reads the real ESP32. When the device is offline, its tanks say when they last heard from it.
+
+The demo is open to everyone, so it has limits nobody can get around: Claude is asked at most 40 times a day, and by hand at most 3 times a minute; logins and the API are rate limited. **Restart demo** puts everything back.
 
 ## How the agent works
 
@@ -123,6 +150,7 @@ A real browser drives the dashboard through the main flows:
 - logging in for each role;
 - lowering a tank until the agent orders it, with PayPal paying right away;
 - confirming the delivery, which refills the tank;
+- a budget too small for any order stopping the agent;
 - a greenhouse manager approving an order;
 - an operator reporting a short delivery;
 - downloading the month's CSV.
@@ -146,18 +174,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 for the dashboard. Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
-
-### Demo users
-
-All four use the password set in `DEMO_PASSWORD`.
-
-| Email | Role | Can do |
-| --- | --- | --- |
-| `operador@agroandes.test` | Operator | See greenhouse 1, confirm deliveries |
-| `encargado@agroandes.test` | Greenhouse manager | Approve greenhouse 1 orders up to $500 |
-| `compras@agroandes.test` | Purchasing | Manage suppliers and prices, never approve |
-| `gerente@agroandes.test` | Manager | Set budgets and limits, approve any order |
+Open http://localhost:3000 for the dashboard. Without `DATABASE_URL` the server uses a local PGlite database in `server/.data` and creates a demo company with three greenhouses on first start. The four demo users from [Try it](#try-it) log in with the `DEMO_PASSWORD` of your `.env`. The ESP32 posts to `POST /api/readings` with its key in the `X-Device-Key` header.
 
 ## Deploy on Render
 
