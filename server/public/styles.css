@@ -10,6 +10,9 @@
   --leaf-dark: #225c39;
   --pollen: #e7b84a;
   --blight: #a8323e;
+  --leaf-tint: #e0efe5;
+  --pollen-tint: #f8edd2;
+  --blight-tint: #f6e3e5;
   --line: #c4d8d1;
 
   --display: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
@@ -48,7 +51,8 @@ h3 {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -133,7 +137,11 @@ input {
 }
 
 .danger:hover {
-  background: #f6e3e5;
+  background: var(--blight-tint);
+}
+
+.orders .quiet:hover {
+  background: var(--glass);
 }
 
 .primary:active,
@@ -266,7 +274,7 @@ button:disabled {
 
 .order {
   display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(13rem, auto);
+  grid-template-columns: 5rem minmax(0, 1fr) minmax(13rem, auto);
   gap: 0.25rem var(--gap);
   padding: 1.4rem 1.6rem;
   border-top: 1px solid var(--line);
@@ -276,9 +284,21 @@ button:disabled {
   border-top: 0;
 }
 
+/* The purchase order number: year small on top, the count large, as printed on the order itself. */
 .order-number {
+  display: grid;
+  align-content: start;
   font: 700 var(--step-2) / 1 var(--display);
+  font-variant-numeric: tabular-nums;
   color: var(--ink-soft);
+}
+
+.order-number small {
+  font: 400 0.8rem / 1.4 var(--text);
+}
+
+.order-number[data-state='po'] {
+  color: var(--ink);
 }
 
 .order h3 {
@@ -296,6 +316,89 @@ button:disabled {
   padding-left: 0.9rem;
   border-left: 3px solid var(--line);
   max-width: 60ch;
+}
+
+/* The delivery slip, with a perforated edge until it is settled. */
+.delivery {
+  margin: 0.8rem 0 0;
+  padding: 0.5rem 0.8rem;
+  max-width: 60ch;
+  border: 1px dashed var(--ink-soft);
+  border-radius: var(--radius);
+}
+
+.delivery p {
+  margin: 0;
+}
+
+.delivery[data-state='late'] {
+  background: var(--pollen-tint);
+  border-color: var(--pollen);
+}
+
+.delivery[data-state='received'] {
+  background: var(--leaf-tint);
+  border: 0;
+}
+
+.delivery[data-state='short'] {
+  background: var(--blight-tint);
+  border: 0;
+  border-left: 4px solid var(--blight);
+}
+
+.delivery-note {
+  margin-top: 0.3rem;
+  font-style: italic;
+}
+
+.receive {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+  padding: 1rem;
+  max-width: 60ch;
+  background: #fff;
+  border: 1px dashed var(--ink-soft);
+  border-radius: var(--radius);
+}
+
+.receive-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.receive-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.receive input,
+.receive textarea {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: #fff;
+}
+
+.receive input {
+  width: 5.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.receive-note {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.receive textarea {
+  resize: vertical;
+}
+
+.receive .actions {
+  justify-content: flex-start;
 }
 
 .order-money {
@@ -399,7 +502,12 @@ button:disabled {
   }
 
   .order {
-    grid-template-columns: 3rem minmax(0, 1fr);
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: 0.25rem 1rem;
+  }
+
+  .order-number {
+    font-size: var(--step-1);
   }
 
   .order-money {

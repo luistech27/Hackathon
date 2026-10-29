@@ -96,8 +96,8 @@ describe('payOrder', () => {
         amountCents: 6_400,
         currency: 'USD',
         vaultId: 'vault-test',
-        customId: `order-${order.id}`,
-        description: expect.stringContaining('AgroInsumos Andinos')
+        customId: `company-1/${order.poNumber}`,
+        description: `Purchase order ${order.poNumber}: AgroInsumos Andinos`
       })
     ])
     expect(await auditActions()).toEqual(['order_created', 'order_paid'])
@@ -305,7 +305,7 @@ describe('payDuePayments', () => {
     await connectPayPal(db)
     await payDuePayments(db, fake.paypal)
 
-    expect(fake.charges.map((charge) => charge.customId)).toEqual([`order-${first.id}`, `order-${second.id}`])
+    expect(fake.charges.map((charge) => charge.customId)).toEqual([`company-1/${first.poNumber}`, `company-1/${second.poNumber}`])
     expect((await paymentOf(second.id))?.status).toBe('paid')
   })
 })

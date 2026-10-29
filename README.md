@@ -53,6 +53,16 @@ The money goes to the PayPal business account of this app's credentials, which s
 
 Without `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` everything else works and approved orders wait unpaid.
 
+## Purchase orders and deliveries
+
+An order becomes a purchase order when it is approved, by the rules or by a person, and gets a number: `PO-2026-0001`, `PO-2026-0002`… counted per company and year, with no gaps. Orders waiting for approval or rejected are only requests and get no number. Each purchase order can be matched against two other records, a simple version of the three-way match companies use:
+
+1. **Purchase order:** greenhouse, supplier, items, prices and total, and who approved it.
+2. **Payment:** PayPal's order and capture ids. The purchase order number is sent to PayPal as the payment's reference (`custom_id`), so it shows up in PayPal's reports.
+3. **Delivery:** the greenhouse's operator, its greenhouse manager or the manager confirms how many packs of each item arrived. If anything is missing, the order is marked as a short delivery so the manager can take it up with the supplier. Purchasing chooses the suppliers, so it cannot confirm deliveries.
+
+Each delivery is confirmed once and recorded in the audit log, with what was ordered and what arrived.
+
 ## Status
 
 - [x] Decision logic: consumption forecast, supplier choice, budget rules (`server/src/domain/`)
@@ -66,7 +76,8 @@ Without `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` everything else works and 
 - [x] Audit log of orders, approvals, budgets, rules and catalog changes
 - [x] Claude purchasing agent: forecasts each supply, picks offers and places orders through the matrix (`server/src/agent/`)
 - [x] PayPal payments: the manager connects PayPal once, approved orders are paid with the saved account (`server/src/payments/`)
-- [x] Dashboard, first part: login, PayPal connection, orders with their payment, approve and reject (`server/public/`)
+- [x] Purchase orders numbered on approval, and deliveries confirmed by the greenhouse (`server/src/orders/`)
+- [x] Dashboard, first part: login, PayPal connection, orders with their payment and delivery, approve, reject and confirm deliveries (`server/public/`)
 - [ ] Dashboard: levels, budgets and simulation mode
 
 ## Firmware

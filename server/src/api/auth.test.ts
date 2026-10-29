@@ -78,7 +78,7 @@ describe('POST /api/auth/login', () => {
     for (let i = 0; i < LOGIN_ATTEMPTS_PER_MINUTE; i++) await login({ email: MANAGER, password: `guess-${i}` })
 
     expect((await login({ email: MANAGER, password: TEST_PASSWORD })).statusCode).toBe(429)
-  })
+  }, 20_000) // every attempt runs the slow password hash: over 5 s when the whole suite runs at once
 })
 
 describe('GET /api/me', () => {

@@ -1,9 +1,23 @@
 import { recordAudit } from '../audit/audit.ts'
 import type { Db, Queryable } from '../db/client.ts'
 import { decideApproval, fitsBudget, type AgentMode, type ApprovalDecision, type Approver } from '../domain/approval.ts'
-import { canApproveOrder, canViewAllGreenhouses, canViewGreenhouse, type Actor } from '../domain/permissions.ts'
+import {
+  canApproveOrder,
+  canConfirmReceipt,
+  canViewAllGreenhouses,
+  canViewGreenhouse,
+  type Actor
+} from '../domain/permissions.ts'
 import { loadPayments, queuePayment, type Payment } from '../payments/payments.ts'
-import { assertItemRequests, loadItems, priceItems, saveItems, type ItemRequest, type OrderItem } from './items.ts'
+import {
+  assertItemRequests,
+  deliveredInFull,
+  loadItems,
+  priceItems,
+  saveItems,
+  type ItemRequest,
+  type OrderItem
+} from './items.ts'
 
 export type OrderStatus = 'pending_approval' | 'approved' | 'rejected'
 export const ORDER_STATUSES = ['pending_approval', 'approved', 'rejected'] as const satisfies readonly OrderStatus[]
@@ -33,6 +47,10 @@ export interface Order {
   decidedBy: number | null
   createdAt: Date
   decidedAt: Date | null
+  poNumber: string | null // PO-2026-0001; only approved orders are purchase orders
+  receivedAt: Date | null // when the greenhouse confirmed the delivery
+  receivedBy: number | null
+  receiptNote: string | null
 }
 
 export interface CreatedOrder extends Order {
@@ -44,14 +62,18 @@ export interface OrderView extends CreatedOrder {
   supplierName: string
   requestedByName: string | null // null: the agent
   decidedByName: string | null // null: the rules, or nobody yet
+  receivedByName: string | null
   canDecide: boolean // whether the user asking may approve or reject it now
+  canReceive: boolean // whether the user asking may confirm its delivery now
+  expectedAt: Date | null // approved orders: the approval plus the longest delivery time promised
+  shortDelivery: boolean // received with something missing: for the manager to review
   payment: Payment | null // null: not approved (or approved before payments existed)
 }
 
 export type DecideError = 'not_found' | 'forbidden' | 'not_pending' | 'over_budget' | 'unavailable'
 export type DecideResult = { ok: true; order: Order } | { ok: false; error: DecideError }
 
-interface OrderRow {
+export interface OrderRow {
   id: number
   company_id: number
   greenhouse_id: number
@@ -66,15 +88,22 @@ interface OrderRow {
   decided_by: number | null
   created_at: Date
   decided_at: Date | null
+  po_number: string | null
+  received_at: Date | null
+  received_by: number | null
+  receipt_note: string | null
 }
 
-const ORDER_COLUMNS = `o.id, o.company_id, o.greenhouse_id, o.supplier_id, o.total_cents, o.approval_amount_cents,
-  o.status, o.required_approver, o.rule_reason, o.reasoning, o.requested_by, o.decided_by, o.created_at, o.decided_at`
+// Every column of OrderRow, for a query on `orders AS o`.
+export const ORDER_COLUMNS = `o.id, o.company_id, o.greenhouse_id, o.supplier_id, o.total_cents, o.approval_amount_cents,
+  o.status, o.required_approver, o.rule_reason, o.reasoning, o.requested_by, o.decided_by, o.created_at, o.decided_at,
+  o.po_number, o.received_at, o.received_by, o.receipt_note`
 
 const LIST_LIMIT = 100 // shortcut: no pagination yet; the newest orders come first
 const MAX_REASONING_LENGTH = 500 // the model's text is shown to people: keep it short, and render it as text only
 const DELIVERY_GRACE_DAYS = 3 // an approved order is expected within its delivery time plus this
 const REJECTION_PAUSE_HOURS = 24 // after a rejection, by a person or by the rules, leave the product alone this long
+const DAY_MS = 24 * 60 * 60 * 1000
 
 // Runs the approval matrix and saves the order with its verdict, in one transaction with the greenhouse
 // locked: two orders made at the same time cannot both take the last of the budget.
@@ -126,6 +155,7 @@ export async function createOrder(db: Db, order: NewOrder): Promise<CreatedOrder
       }
     )
     const verdict = toVerdict(decision, totalCents)
+    // An approved order gets its purchase order number from the database (see assign_po_number in schema.sql).
     const inserted = await tx.query<OrderRow>(
       `INSERT INTO orders AS o (company_id, greenhouse_id, supplier_id, total_cents, approval_amount_cents, status,
          required_approver, rule_reason, reasoning, requested_by, decided_at)
@@ -154,7 +184,13 @@ export async function createOrder(db: Db, order: NewOrder): Promise<CreatedOrder
       entity: 'order',
       entityId: created.id,
       before: null,
-      after: { status: created.status, ruleReason: created.ruleReason, totalCents, reasoning: created.reasoning }
+      after: {
+        status: created.status,
+        ruleReason: created.ruleReason,
+        totalCents,
+        reasoning: created.reasoning,
+        poNumber: created.poNumber
+      }
     })
     return { ...created, items }
   })
@@ -171,21 +207,15 @@ export function rejectOrder(db: Db, actor: Actor, orderId: number): Promise<Deci
 export async function listOrders(db: Queryable, actor: Actor, status?: OrderStatus): Promise<OrderView[]> {
   const seesAll = canViewAllGreenhouses(actor)
   if (!seesAll && actor.greenhouseId === null) return [] // the schema forbids this; fail closed
-  const { rows } = await db.query<
-    OrderRow & {
-      greenhouse_name: string
-      supplier_name: string
-      requested_by_name: string | null
-      decided_by_name: string | null
-    }
-  >(
+  const { rows } = await db.query<ListedRow>(
     `SELECT ${ORDER_COLUMNS}, g.name AS greenhouse_name, s.name AS supplier_name,
-       ru.name AS requested_by_name, du.name AS decided_by_name
+       ru.name AS requested_by_name, du.name AS decided_by_name, rcv.name AS received_by_name
      FROM orders o
      JOIN greenhouses g ON g.id = o.greenhouse_id
      JOIN suppliers s ON s.id = o.supplier_id
      LEFT JOIN users ru ON ru.id = o.requested_by
      LEFT JOIN users du ON du.id = o.decided_by
+     LEFT JOIN users rcv ON rcv.id = o.received_by
      WHERE o.company_id = $1 AND ($2::int IS NULL OR o.greenhouse_id = $2) AND ($3::text IS NULL OR o.status = $3)
      ORDER BY o.created_at DESC, o.id DESC
      LIMIT ${LIST_LIMIT}`,
@@ -194,19 +224,35 @@ export async function listOrders(db: Queryable, actor: Actor, status?: OrderStat
   const orderIds = rows.map((row) => row.id)
   const items = await loadItems(db, orderIds)
   const payments = await loadPayments(db, orderIds)
-  return rows.map((row) => {
-    const order = toOrder(row)
-    return {
-      ...order,
-      items: items.get(order.id) ?? [],
-      greenhouseName: row.greenhouse_name,
-      supplierName: row.supplier_name,
-      requestedByName: row.requested_by_name,
-      decidedByName: row.decided_by_name,
-      canDecide: order.status === 'pending_approval' && canApproveOrder(actor, toOrderToApprove(order)),
-      payment: payments.get(order.id) ?? null
-    }
-  })
+  return rows.map((row) => toView(actor, row, items.get(row.id) ?? [], payments.get(row.id) ?? null))
+}
+
+interface ListedRow extends OrderRow {
+  greenhouse_name: string
+  supplier_name: string
+  requested_by_name: string | null
+  decided_by_name: string | null
+  received_by_name: string | null
+}
+
+function toView(actor: Actor, row: ListedRow, items: OrderItem[], payment: Payment | null): OrderView {
+  const order = toOrder(row)
+  const approved = order.status === 'approved'
+  const longestDeliveryDays = Math.max(0, ...items.map((item) => item.leadTimeDays))
+  return {
+    ...order,
+    items,
+    greenhouseName: row.greenhouse_name,
+    supplierName: row.supplier_name,
+    requestedByName: row.requested_by_name,
+    decidedByName: row.decided_by_name,
+    receivedByName: row.received_by_name,
+    canDecide: order.status === 'pending_approval' && canApproveOrder(actor, toOrderToApprove(order)),
+    canReceive: approved && order.receivedAt === null && canConfirmReceipt(actor, order),
+    expectedAt: approved && order.decidedAt ? new Date(order.decidedAt.getTime() + longestDeliveryDays * DAY_MS) : null,
+    shortDelivery: order.receivedAt !== null && !deliveredInFull(items),
+    payment
+  }
 }
 
 // Locks the order's greenhouse, so no new order takes the budget while this one is being approved,
@@ -240,6 +286,7 @@ async function decideOrder(
       if (!(await stillAvailable(tx, order))) return failed('unavailable')
     }
 
+    // Approving numbers the order (assign_po_number in schema.sql).
     const updated = await tx.query<OrderRow>(
       `UPDATE orders AS o SET status = $2, decided_by = $3, decided_at = now()
        WHERE o.id = $1 AND o.status = 'pending_approval'
@@ -256,7 +303,7 @@ async function decideOrder(
       entity: 'order',
       entityId: order.id,
       before: { status: order.status },
-      after: { status: decided.status }
+      after: { status: decided.status, poNumber: decided.po_number }
     })
     return { ok: true, order: toOrder(decided) }
   })
@@ -363,7 +410,7 @@ function toVerdict(decision: ApprovalDecision, totalCents: number) {
   }
 }
 
-function toOrder(row: OrderRow): Order {
+export function toOrder(row: OrderRow): Order {
   return {
     id: row.id,
     companyId: row.company_id,
@@ -378,7 +425,11 @@ function toOrder(row: OrderRow): Order {
     requestedBy: row.requested_by,
     decidedBy: row.decided_by,
     createdAt: row.created_at,
-    decidedAt: row.decided_at
+    decidedAt: row.decided_at,
+    poNumber: row.po_number,
+    receivedAt: row.received_at,
+    receivedBy: row.received_by,
+    receiptNote: row.receipt_note
   }
 }
 

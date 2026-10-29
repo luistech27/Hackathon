@@ -65,6 +65,7 @@ describe('POST /api/orders/:id/approve', () => {
 
     expect(res.statusCode).toBe(200)
     expect(res.json().data.order).toMatchObject({ id: order.id, status: 'approved', decidedBy: 2 })
+    expect(res.json().data.order.poNumber).toMatch(/^PO-\d{4}-0001$/)
   })
 
   it('keeps a split order for the manager when the 7 days with that supplier pass the limit', async () => {
@@ -235,5 +236,109 @@ describe('GET /api/orders', () => {
 
   it('answers 400 for an unknown status', async () => {
     expect((await list(MANAGER, '?status=paid_twice')).statusCode).toBe(400)
+  })
+})
+
+describe('POST /api/orders/:id/receive', () => {
+  const receive = async (email: string, orderId: number | string, payload: unknown) =>
+    app.inject({
+      method: 'POST',
+      url: `/api/orders/${orderId}/receive`,
+      headers: { cookie: await loginAs(app, email) },
+      payload: payload as object
+    })
+
+  // $90 at $1 a pack: approved by the rules.
+  const approved = async () => {
+    const order = await newOrder(9_000)
+    return { order, offerId: order.items[0]?.offerId ?? 0 }
+  }
+
+  it('lets the operator confirm what arrived', async () => {
+    const { order, offerId } = await approved()
+
+    const res = await receive(OPERATOR, order.id, { items: [{ offerId, receivedPacks: 85 }], note: '  5 packs missing  ' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data.order).toMatchObject({ id: order.id, receivedBy: 1, receiptNote: '5 packs missing' })
+    const [shown] = (await list(OPERATOR)).json().data.orders
+    expect(shown).toMatchObject({ shortDelivery: true, receivedByName: 'Ana Operadora' })
+  })
+
+  it('stores an empty note as no note', async () => {
+    const { order, offerId } = await approved()
+
+    const res = await receive(OPERATOR, order.id, { items: [{ offerId, receivedPacks: 90 }], note: '   ' })
+
+    expect(res.json().data.order.receiptNote).toBeNull()
+  })
+
+  it.each([
+    ['no items', { items: [] }],
+    ['packs as text', { items: [{ offerId: 1, receivedPacks: '90' }] }],
+    ['an unknown field', { items: [{ offerId: 1, receivedPacks: 90 }], paid: true }],
+    ['a note over 300 characters', { items: [{ offerId: 1, receivedPacks: 90 }], note: 'x'.repeat(301) }],
+    ['no body', undefined]
+  ])('answers 400 for %s', async (_name, payload) => {
+    const { order } = await approved()
+
+    expect((await receive(OPERATOR, order.id, payload)).statusCode).toBe(400)
+  })
+
+  it('says when the note is what was refused', async () => {
+    const { order, offerId } = await approved()
+
+    const res = await receive(OPERATOR, order.id, { items: [{ offerId, receivedPacks: 90 }], note: 'ok‮gnorw' })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/note/)
+  })
+
+  it('answers 400 when the items do not match the order', async () => {
+    const { order, offerId } = await approved()
+
+    const res = await receive(OPERATOR, order.id, { items: [{ offerId, receivedPacks: 91 }] })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/each item/)
+  })
+
+  it('answers 409 the second time', async () => {
+    const { order, offerId } = await approved()
+    await receive(OPERATOR, order.id, { items: [{ offerId, receivedPacks: 90 }] })
+
+    const res = await receive(MANAGER, order.id, { items: [{ offerId, receivedPacks: 90 }] })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/already/)
+  })
+
+  it('answers 409 for an order still waiting for approval', async () => {
+    const order = await newOrder(30_000)
+
+    const res = await receive(OPERATOR, order.id, { items: [{ offerId: order.items[0]?.offerId, receivedPacks: 300 }] })
+
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('answers 403 to purchasing and 404 to an operator of another greenhouse', async () => {
+    const { order, offerId } = await approved()
+    const elsewhere = await newOrder(9_000, { greenhouseId: 2 })
+    const body = { items: [{ offerId, receivedPacks: 90 }] }
+
+    expect((await receive(PURCHASING, order.id, body)).statusCode).toBe(403)
+    expect((await receive(OPERATOR, elsewhere.id, body)).statusCode).toBe(404)
+  })
+
+  it('requires a session', async () => {
+    const { order, offerId } = await approved()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/orders/${order.id}/receive`,
+      payload: { items: [{ offerId, receivedPacks: 90 }] }
+    })
+
+    expect(res.statusCode).toBe(401)
   })
 })

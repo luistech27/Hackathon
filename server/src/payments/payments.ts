@@ -64,6 +64,7 @@ interface Claim {
   currency: string
   paypal_order_id: string | null
   vault_id: string
+  po_number: string // approved orders always have one
   supplier_name: string
   supplier_usable: boolean // still active and approved: purchasing may have dropped it since the approval
   queued_too_long: boolean
@@ -225,7 +226,7 @@ async function claimPayment(db: Queryable, orderId: number): Promise<Claim | nul
      JOIN suppliers s ON s.id = o.supplier_id
      WHERE p.order_id = $1 AND o.id = p.order_id AND ${DUE}
      RETURNING p.order_id, o.company_id, p.claim_id, p.request_id, p.tries, p.amount_cents, p.currency,
-       p.paypal_order_id, a.vault_id, s.name AS supplier_name,
+       p.paypal_order_id, a.vault_id, o.po_number, s.name AS supplier_name,
        s.active AND s.approved_at IS NOT NULL AS supplier_usable,
        p.queued_at < now() - ${MAX_QUEUED_DAYS} * interval '1 day' AS queued_too_long,
        COALESCE(p.maybe_sent_at < now() - ${SAME_REQUEST_WINDOW_MINUTES} * interval '1 minute', false)
@@ -242,8 +243,9 @@ async function charge(paypal: PayPal, claim: Claim, log?: PaymentLog): Promise<S
       requestId: claim.request_id,
       amountCents: claim.amount_cents,
       currency: claim.currency,
-      description: `Greenhouse order ${claim.order_id}: ${claim.supplier_name}`,
-      customId: `order-${claim.order_id}`,
+      description: `Purchase order ${claim.po_number}: ${claim.supplier_name}`,
+      // Shows in PayPal's reports. Every company counts from PO-<year>-0001, so the company comes first.
+      customId: `company-${claim.company_id}/${claim.po_number}`,
       vaultId: claim.vault_id
     })
     return settle(payment)

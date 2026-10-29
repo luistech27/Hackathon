@@ -125,7 +125,7 @@ describe('greenhouseSnapshot', () => {
     it('leaves a product alone for a day after its order was rejected, then restocks it again', async () => {
       await fertilizerFalling(8_000)
       const order = await orderNpk()
-      await db.query(`UPDATE orders SET status = 'rejected', decided_at = now() WHERE id = $1`, [order.id])
+      await db.query(`UPDATE orders SET status = 'rejected', po_number = NULL, decided_at = now() WHERE id = $1`, [order.id])
       expect(await fertilizer()).toMatchObject({ hasOpenOrder: true, needsRestock: false })
 
       await db.query(`UPDATE orders SET decided_at = now() - interval '25 hours' WHERE id = $1`, [order.id])

@@ -255,3 +255,79 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS payments_due ON payments (queued_at) WHERE status IN ('queued', 'processing', 'pending');
+
+-- Purchase order numbers: one count per company and calendar year, with no gaps (PO-2026-0001, PO-2026-0002...).
+CREATE TABLE IF NOT EXISTS purchase_order_counters (
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  year INTEGER NOT NULL,
+  last_number INTEGER NOT NULL CHECK (last_number >= 1),
+  PRIMARY KEY (company_id, year)
+);
+
+CREATE OR REPLACE FUNCTION format_po_number(po_year INTEGER, seq BIGINT) RETURNS TEXT
+  LANGUAGE sql IMMUTABLE
+  RETURN 'PO-' || po_year || '-' || lpad(seq::text, greatest(4, length(seq::text)), '0');
+
+-- An approved order is a purchase order and carries its number; one pending or rejected is only a request.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_number TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_po_number ON orders (company_id, po_number);
+
+-- The database numbers an order the moment it becomes approved, whatever code approves it (including the
+-- previous version, still running for a moment during a deploy). The counter row stays locked until the
+-- transaction ends, so numbers come out in order, and an approval that is rolled back gives its number back.
+CREATE OR REPLACE FUNCTION assign_po_number() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  po_year INTEGER;
+  seq INTEGER;
+BEGIN
+  SELECT EXTRACT(YEAR FROM now() AT TIME ZONE c.timezone)::int INTO STRICT po_year FROM companies c WHERE c.id = NEW.company_id;
+  INSERT INTO purchase_order_counters AS pc (company_id, year, last_number) VALUES (NEW.company_id, po_year, 1)
+  ON CONFLICT (company_id, year) DO UPDATE SET last_number = pc.last_number + 1
+  RETURNING pc.last_number INTO seq;
+  NEW.po_number := format_po_number(po_year, seq);
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE TRIGGER orders_po_number BEFORE INSERT OR UPDATE OF status ON orders
+  FOR EACH ROW WHEN (NEW.status = 'approved' AND NEW.po_number IS NULL) EXECUTE FUNCTION assign_po_number();
+
+-- What arrived, confirmed once by the greenhouse: an order short of anything is marked for review.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS received_packs INTEGER CHECK (received_packs BETWEEN 0 AND packs);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_by INTEGER;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_note TEXT CHECK (char_length(receipt_note) <= 300);
+
+-- Orders approved before purchase order numbers existed get theirs, in the order they were approved.
+-- Runs on start, before the server takes requests; on later starts it finds nothing to number.
+WITH missing AS (
+  SELECT o.id, o.company_id, EXTRACT(YEAR FROM o.decided_at AT TIME ZONE c.timezone)::int AS year,
+    ROW_NUMBER() OVER (
+      PARTITION BY o.company_id, EXTRACT(YEAR FROM o.decided_at AT TIME ZONE c.timezone) ORDER BY o.decided_at, o.id
+    ) AS n
+  FROM orders o JOIN companies c ON c.id = o.company_id
+  WHERE o.status = 'approved' AND o.po_number IS NULL
+), counted AS (
+  INSERT INTO purchase_order_counters AS pc (company_id, year, last_number)
+  SELECT company_id, year, MAX(n) FROM missing GROUP BY company_id, year
+  ON CONFLICT (company_id, year) DO UPDATE SET last_number = pc.last_number + EXCLUDED.last_number
+  RETURNING pc.company_id, pc.year, COALESCE(old.last_number, 0) AS numbers_before
+)
+UPDATE orders o SET po_number = format_po_number(m.year, c.numbers_before + m.n)
+FROM missing m JOIN counted c ON c.company_id = m.company_id AND c.year = m.year
+WHERE o.id = m.id;
+
+-- Adds a constraint unless the table already has one of that name: Postgres has no ADD CONSTRAINT IF NOT EXISTS.
+-- Only ever called below, with definitions written in this file.
+CREATE OR REPLACE PROCEDURE add_constraint_once(tbl REGCLASS, name TEXT, definition TEXT)
+  LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = tbl AND conname = name) THEN
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s', tbl, name, definition);
+  END IF;
+END $$;
+
+CALL add_constraint_once('orders', 'orders_po_number_when_approved', 'CHECK ((status = ''approved'') = (po_number IS NOT NULL))');
+CALL add_constraint_once('orders', 'orders_received_when_approved', 'CHECK (received_at IS NULL OR status = ''approved'')');
+CALL add_constraint_once('orders', 'orders_received_by_whom', 'CHECK ((received_at IS NULL) = (received_by IS NULL))');
+CALL add_constraint_once('orders', 'orders_received_by_company',
+  'FOREIGN KEY (company_id, received_by) REFERENCES users (company_id, id)');

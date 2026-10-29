@@ -89,7 +89,7 @@ Reglas de control:
 
 Versión simple de la conciliación de 3 documentos (three-way match) que usan las empresas:
 
-1. **Orden de compra** con número propio (`OC-2026-0001`): invernadero, proveedor, ítems, cantidades, precios y total.
+1. **Orden de compra** con número propio (`PO-2026-0001`): invernadero, proveedor, ítems, cantidades, precios y total.
 2. **Comprobante de pago:** la orden de PayPal (ID y estado).
 3. **Recepción:** el operador confirma si llegó completo o cuánto faltó; si falta algo, la orden queda marcada para revisión.
 
@@ -145,7 +145,7 @@ Quedan 15 días; la entrega queda lista el 11 de noviembre y el 12 es solo marge
 
 - [x] Guardar método de pago (Vault) desde el dashboard del gerente
 - [x] Compra automática con `vault_id` y compra tras aprobación (probado en Sandbox el 29 oct)
-- [ ] Órdenes de compra numeradas, recepción por el operador y registro de auditoría
+- [x] Órdenes de compra numeradas (PO-2026-0001), recepción por el operador y registro de auditoría
 
 **7–9 nov · Dashboard y simulación**
 

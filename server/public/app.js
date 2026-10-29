@@ -1,4 +1,4 @@
-// The dashboard: login, the manager's PayPal connection and the orders with their payments.
+// The dashboard: login, the manager's PayPal connection and the orders with their payments and deliveries.
 // Everything shown comes from the API, and text is always set as text, never as HTML.
 
 const REFRESH_MS = 20_000 // payments settle in the background, so the list refreshes itself
@@ -25,14 +25,16 @@ const PAYMENT_ERRORS = {
 }
 
 const $ = (id) => document.getElementById(id)
-const state = { user: null, currency: 'USD', tags: new Map() }
+// receiving: the order whose delivery form is open; the list does not refresh under it
+const state = { user: null, currency: 'USD', tags: new Map(), receiving: null }
 
 async function api(method, url, body) {
   const response = await fetch(url, {
     method,
     headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined
-  })
+  }).catch(() => null)
+  if (!response) return { status: 0, ok: false, data: undefined, error: 'The server cannot be reached; check the connection and try again' }
   const json = await response.json().catch(() => null)
   return {
     status: response.status,
@@ -65,8 +67,11 @@ function flash(message, bad = false) {
 const money = (cents) => new Intl.NumberFormat('en-US', { style: 'currency', currency: state.currency }).format(cents / 100)
 const when = (iso) =>
   new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+const day = (iso) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
 const size = (amount, unit) =>
   unit === 'g' && amount >= 1000 ? `${amount / 1000} kg` : `${amount.toLocaleString('en-US')} ${unit}`
+const packsOf = (item) => `${item.packs} × ${size(item.packSize, item.unit)} ${item.productName}`
+const label = (order) => order.poNumber ?? `Order #${order.id}`
 
 async function boot() {
   const me = await api('GET', '/api/me')
@@ -142,13 +147,16 @@ async function connectPayPal() {
   flash(res.ok ? 'PayPal sent an unexpected link; try again' : res.error, true)
 }
 
-async function loadOrders() {
+// The timed refresh passes force = false: a delivery form opened while the list loaded is left alone.
+async function loadOrders(force = true) {
   const res = await api('GET', '/api/orders')
+  if (!force && state.receiving !== null) return
   if (res.status === 401) return showLogin()
   if (!res.ok) return flash(res.error, true)
   const orders = res.data.orders
   const previous = state.tags
   state.tags = new Map()
+  state.receiving = null
   $('orders').replaceChildren(...orders.map((order) => orderRow(order, previous)))
   $('orders-empty').hidden = orders.length > 0
   $('orders-count').textContent = orders.length === 1 ? '1 order' : `${orders.length} orders`
@@ -161,21 +169,101 @@ function orderRow(order, previous) {
     if (previous.has(order.id) && previous.get(order.id) !== key) tag.classList.add('changed')
     state.tags.set(order.id, key)
   }
-  const items = order.items.map((item) => `${item.packs} × ${size(item.packSize, item.unit)} ${item.productName}`)
   return h(
     'li',
-    { class: 'order' },
-    h('span', { class: 'order-number' }, `#${order.id}`),
+    { class: 'order', 'data-order': order.id },
+    orderNumber(order),
     h(
       'div',
-      {},
+      { class: 'order-body' },
       h('h3', {}, order.supplierName),
       h('p', { class: 'order-meta' }, `${order.greenhouseName}. Ordered by ${order.requestedByName ?? 'the agent'} on ${when(order.createdAt)}`),
-      h('p', { class: 'order-items' }, items.join('; ')),
-      h('p', { class: 'order-reasoning' }, order.reasoning)
+      h('p', { class: 'order-items' }, order.items.map(packsOf).join('; ')),
+      h('p', { class: 'order-reasoning' }, order.reasoning),
+      delivery(order)
     ),
     h('div', { class: 'order-money' }, h('span', { class: 'total' }, money(order.totalCents)), h('span', { class: 'approval' }, approval(order)), tag, actions(order))
   )
+}
+
+// An approved order is a purchase order: its number is the year and the count, the count set large.
+// Anything else is still a request, known by its id.
+function orderNumber(order) {
+  const po = /^(PO-\d{4}-)(\d+)$/.exec(order.poNumber ?? '')
+  if (po) return h('span', { class: 'order-number', state: 'po' }, h('small', {}, po[1]), po[2])
+  return h('span', { class: 'order-number' }, h('small', {}, 'Request '), `#${order.id}`)
+}
+
+// The delivery slip: on its way, late, arrived in full, or short and waiting for the manager.
+function delivery(order) {
+  if (order.status !== 'approved') return null
+  if (!order.receivedAt) {
+    if (!order.expectedAt) return null
+    const late = new Date(order.expectedAt) < new Date()
+    return h('p', { class: 'delivery', state: late ? 'late' : 'due' }, h('strong', {}, late ? 'Late' : 'On its way'), `: expected by ${day(order.expectedAt)}.`)
+  }
+  const who = `confirmed by ${order.receivedByName ?? 'the greenhouse'} on ${day(order.receivedAt)}`
+  const note = order.receiptNote ? h('p', { class: 'delivery-note' }, `“${order.receiptNote}”`) : null
+  if (!order.shortDelivery) return h('div', { class: 'delivery', state: 'received' }, h('p', {}, h('strong', {}, 'Delivered in full'), `, ${who}.`), note)
+  const arrived = order.items
+    .filter((item) => item.receivedPacks < item.packs)
+    .map((item) => `${item.receivedPacks} of ${packsOf(item)}`)
+  return h(
+    'div',
+    { class: 'delivery', state: 'short' },
+    h('p', {}, h('strong', {}, 'Short delivery'), `: only ${arrived.join('; ')} arrived, ${who}. Check it with the supplier.`),
+    note
+  )
+}
+
+function openReceive(button, order) {
+  const slot = button.closest('.order').querySelector('.order-body')
+  const form = receiveForm(order)
+  slot.querySelector('.delivery')?.remove()
+  slot.append(form)
+  button.hidden = true
+  state.receiving = order.id
+  form.querySelector('input')?.focus()
+}
+
+function receiveForm(order) {
+  const counts = order.items.map((item) => {
+    const input = h('input', { type: 'number', min: '0', max: String(item.packs), step: '1', value: String(item.packs), required: '', inputmode: 'numeric' })
+    return { item, input, row: h('label', { class: 'receive-item' }, input, h('span', {}, `of ${packsOf(item)}`)) }
+  })
+  const note = h('textarea', { rows: '2', maxlength: '300' })
+  const submit = h('button', { type: 'submit', class: 'primary' }, 'Confirm delivery')
+  const cancel = h('button', { type: 'button', class: 'quiet', onclick: () => closeReceive(order) }, 'Cancel')
+  const form = h(
+    'form',
+    { class: 'receive', 'aria-label': `Delivery of ${label(order)}` },
+    h('p', { class: 'receive-title' }, 'How many packs arrived?'),
+    counts.map(({ row }) => row),
+    h('label', { class: 'receive-note' }, 'Note for the manager (optional)', note),
+    h('div', { class: 'actions' }, submit, cancel)
+  )
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    submit.disabled = true
+    const items = counts.map(({ item, input }) => ({ offerId: item.offerId, receivedPacks: Number(input.value) }))
+    const res = await api('POST', `/api/orders/${order.id}/receive`, { items, note: note.value })
+    if (!res.ok) {
+      submit.disabled = false
+      flash(res.error, true)
+      // Someone else confirmed it, or it is gone: show the list as it is now.
+      if (res.status === 404 || res.status === 409) await loadOrders()
+      return
+    }
+    const short = counts.some(({ item, input }) => Number(input.value) < item.packs)
+    flash(short ? `${label(order)}: short delivery saved and marked for the manager to review.` : `${label(order)}: delivered in full.`)
+    await loadOrders()
+  })
+  return form
+}
+
+async function closeReceive(order) {
+  await loadOrders()
+  document.querySelector(`[data-order="${order.id}"] .receive-open`)?.focus()
 }
 
 function approval(order) {
@@ -207,6 +295,9 @@ function actions(order) {
   if (order.payment?.status === 'failed' && state.user.role === 'manager') {
     buttons.push(h('button', { type: 'button', class: 'quiet', onclick: (e) => retry(e.currentTarget, order) }, 'Try payment again'))
   }
+  if (order.canReceive) {
+    buttons.push(h('button', { type: 'button', class: 'quiet receive-open', onclick: (e) => openReceive(e.currentTarget, order) }, 'Confirm delivery'))
+  }
   return buttons.length ? h('div', { class: 'actions' }, buttons) : null
 }
 
@@ -217,10 +308,11 @@ async function decide(button, order, action) {
     button.disabled = false
     return flash(res.error, true)
   }
-  if (action === 'reject') flash(`Order #${order.id} rejected.`)
-  else if (res.data.payment?.status === 'paid') flash(`Order #${order.id} approved and paid with PayPal.`)
-  else if (res.data.payment?.status === 'failed') flash(`Order #${order.id} approved, but the payment failed.`, true)
-  else flash(`Order #${order.id} approved. It is paid as soon as PayPal confirms.`)
+  const name = label(res.data.order)
+  if (action === 'reject') flash(`${name} rejected.`)
+  else if (res.data.payment?.status === 'paid') flash(`${name} approved and paid with PayPal.`)
+  else if (res.data.payment?.status === 'failed') flash(`${name} approved, but the payment failed.`, true)
+  else flash(`${name} approved. It is paid as soon as PayPal confirms.`)
   await loadOrders()
 }
 
@@ -231,7 +323,7 @@ async function retry(button, order) {
     button.disabled = false
     return flash(res.error, true)
   }
-  flash(res.data.payment.status === 'paid' ? `Order #${order.id} paid with PayPal.` : `Order #${order.id}: payment tried again.`)
+  flash(res.data.payment.status === 'paid' ? `${label(order)} paid with PayPal.` : `${label(order)}: payment tried again.`)
   await loadOrders()
 }
 
@@ -255,7 +347,7 @@ $('logout').addEventListener('click', async () => {
 $('paypal-connect').addEventListener('click', connectPayPal)
 
 setInterval(() => {
-  if (state.user && !document.hidden) void loadOrders()
+  if (state.user && !document.hidden && state.receiving === null) void loadOrders(false)
 }, REFRESH_MS)
 
 void boot()

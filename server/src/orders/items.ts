@@ -1,7 +1,7 @@
 import type { Queryable } from '../db/client.ts'
 
 export const MAX_PACKS_PER_ITEM = 10_000
-const MAX_ITEMS_PER_ORDER = 20
+export const MAX_ITEMS_PER_ORDER = 20
 const MAX_ORDER_CENTS = 100_000_000 // $1,000,000: above any budget, and it still fits the INTEGER column
 const MAX_ID = 2_147_483_647 // Postgres INTEGER
 
@@ -22,6 +22,7 @@ export interface OrderItem {
   packPriceCents: number
   leadTimeDays: number
   lineCents: number
+  receivedPacks: number | null // what the greenhouse confirmed arrived; null until then
 }
 
 interface OfferRow {
@@ -39,6 +40,7 @@ interface ItemRow extends Omit<OfferRow, 'id' | 'min_packs'> {
   order_id: number
   offer_id: number
   packs: number
+  received_packs: number | null
 }
 
 // What can be checked before touching the database or taking any lock.
@@ -80,7 +82,7 @@ export async function priceItems(
     const offer = offers.get(offerId)
     if (!offer) throw new Error(`Offer ${offerId} is not an active offer of supplier ${supplierId}`)
     if (packs < offer.min_packs) throw new RangeError(`Offer ${offerId} needs at least ${offer.min_packs} packs`)
-    return toItem({ ...offer, offer_id: offerId, packs })
+    return toItem({ ...offer, offer_id: offerId, packs, received_packs: null })
   })
   const totalCents = priced.reduce((sum, item) => sum + item.lineCents, 0)
   if (totalCents > MAX_ORDER_CENTS) throw new RangeError(`An order may not pass ${MAX_ORDER_CENTS} cents`)
@@ -109,7 +111,7 @@ export async function loadItems(db: Queryable, orderIds: readonly number[]): Pro
   if (orderIds.length === 0) return byOrder
   const { rows } = await db.query<ItemRow>(
     `SELECT oi.order_id, oi.offer_id, oi.product_id, p.name AS product_name, p.unit, oi.packs, oi.pack_size,
-       oi.pack_price_cents, oi.lead_time_days
+       oi.pack_price_cents, oi.lead_time_days, oi.received_packs
      FROM order_items oi JOIN products p ON p.id = oi.product_id
      WHERE oi.order_id = ANY($1::int[]) ORDER BY oi.id`,
     [orderIds]
@@ -128,6 +130,11 @@ function toItem(row: Omit<ItemRow, 'order_id'>): OrderItem {
     packSize: row.pack_size,
     packPriceCents: row.pack_price_cents,
     leadTimeDays: row.lead_time_days,
-    lineCents: row.packs * row.pack_price_cents
+    lineCents: row.packs * row.pack_price_cents,
+    receivedPacks: row.received_packs
   }
 }
+
+// Every pack of every item arrived. Only meaningful once the delivery was confirmed.
+export const deliveredInFull = (items: readonly OrderItem[]): boolean =>
+  items.every((item) => item.receivedPacks === item.packs)

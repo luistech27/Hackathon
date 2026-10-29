@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { openDb, type Db } from '../db/client.ts'
+import type { Actor } from '../domain/permissions.ts'
 import { addDollarOffers, dollarItems, resetDemo } from '../testing.ts'
-import { createOrder, listOrders, type NewOrder } from './orders.ts'
+import { approveOrder, createOrder, listOrders, type NewOrder } from './orders.ts'
 
 // Demo data: company 1; greenhouses 1-3 with budgets of $1500, $1200 and $1000;
 // greenhouse 1 has a greenhouse manager with a $500 limit; suppliers 1-3; offers 1-5, where
@@ -53,7 +54,8 @@ describe('createOrder from the catalog', () => {
         packSize: 25_000,
         packPriceCents: 3_200,
         leadTimeDays: 2,
-        lineCents: 9_600
+        lineCents: 9_600,
+        receivedPacks: null
       }
     ])
   })
@@ -245,7 +247,9 @@ describe('createOrder', () => {
 
     it('ignores rejected orders', async () => {
       const rejected = await createOrder(db, order(9_000))
-      await db.query(`UPDATE orders SET status = 'rejected', decided_at = now() WHERE id = $1`, [rejected.id])
+      await db.query(`UPDATE orders SET status = 'rejected', po_number = NULL, decided_at = now() WHERE id = $1`, [
+        rejected.id
+      ])
 
       expect((await createOrder(db, order(2_000))).status).toBe('approved')
     })
@@ -294,5 +298,98 @@ describe('createOrder', () => {
 
       await expect(createOrder(db, fromCatalog(1, [{ offerId: rows[0]?.id ?? 0, packs: 1 }]))).rejects.toThrow(/Offer/)
     })
+  })
+})
+
+describe('purchase order numbers', () => {
+  const manager: Actor = { id: 4, companyId: 1, role: 'manager', greenhouseId: null, approvalLimitCents: 0 }
+  let year: number
+
+  beforeEach(async () => {
+    const { rows } = await db.query<{ year: number }>(
+      `SELECT EXTRACT(YEAR FROM now() AT TIME ZONE 'America/Guayaquil')::int AS year`
+    )
+    year = rows[0]?.year ?? 0
+  })
+
+  it('numbers the orders the rules approve, one after the other', async () => {
+    const first = await createOrder(db, order(9_000))
+    const second = await createOrder(db, order(1_000, { supplierId: 2 }))
+
+    expect(first.poNumber).toBe(`PO-${year}-0001`)
+    expect(second.poNumber).toBe(`PO-${year}-0002`)
+  })
+
+  it('gives no number to an order waiting for approval or rejected: it is not a purchase order yet', async () => {
+    const pending = await createOrder(db, order(30_000))
+    const rejected = await createOrder(db, order(200_000, { supplierId: 2 }))
+
+    expect([pending.status, pending.poNumber]).toEqual(['pending_approval', null])
+    expect([rejected.status, rejected.poNumber]).toEqual(['rejected', null])
+  })
+
+  it('numbers an order when a person approves it, after the ones approved before', async () => {
+    const pending = await createOrder(db, order(30_000))
+    await createOrder(db, order(1_000, { supplierId: 2 }))
+
+    const approved = await approveOrder(db, manager, pending.id)
+
+    expect(approved).toMatchObject({ ok: true, order: { poNumber: `PO-${year}-0002` } })
+  })
+
+  it('numbers an order approved by code that knows nothing of numbers, like the previous version during a deploy', async () => {
+    const pending = await createOrder(db, order(30_000))
+
+    await db.query(`UPDATE orders SET status = 'approved', decided_at = now() WHERE id = $1`, [pending.id])
+
+    const { rows } = await db.query<{ po_number: string }>('SELECT po_number FROM orders WHERE id = $1', [pending.id])
+    expect(rows[0]?.po_number).toBe(`PO-${year}-0001`)
+  })
+
+  it('loses no number when the order fails after taking one', async () => {
+    await db.query(`CREATE FUNCTION refuse_items() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'disk full'; END $$`)
+    await db.query('CREATE TRIGGER refuse_items BEFORE INSERT ON order_items FOR EACH ROW EXECUTE FUNCTION refuse_items()')
+    try {
+      await expect(createOrder(db, order(1_000))).rejects.toThrow('disk full')
+    } finally {
+      await db.query('DROP TRIGGER refuse_items ON order_items')
+      await db.query('DROP FUNCTION refuse_items()')
+    }
+
+    expect((await createOrder(db, order(1_000))).poNumber).toBe(`PO-${year}-0001`)
+  })
+
+  it('starts again at 0001 each year', async () => {
+    await db.query('INSERT INTO purchase_order_counters (company_id, year, last_number) VALUES (1, $1, 57)', [year - 1])
+
+    expect((await createOrder(db, order(1_000))).poNumber).toBe(`PO-${year}-0001`)
+  })
+
+  it('keeps every digit past 9999', async () => {
+    await db.query('INSERT INTO purchase_order_counters (company_id, year, last_number) VALUES (1, $1, 9999)', [year])
+
+    expect((await createOrder(db, order(1_000))).poNumber).toBe(`PO-${year}-10000`)
+  })
+
+  it('counts each company apart', async () => {
+    await db.query(`INSERT INTO companies (name) VALUES ('Other company')`)
+    await db.query(`INSERT INTO greenhouses (company_id, name, monthly_budget_cents) VALUES (2, 'Theirs', 100000)`)
+    await db.query(`INSERT INTO suppliers (company_id, name, approved_at) VALUES (2, 'Their supplier', now())`)
+    await db.query(`INSERT INTO products (company_id, name, unit) VALUES (2, 'Their product', 'g')`)
+    const { rows } = await db.query<{ id: number }>(
+      `INSERT INTO offers (company_id, supplier_id, product_id, pack_size, pack_price_cents, lead_time_days)
+       VALUES (2, 4, 4, 1, 100, 1) RETURNING id`
+    )
+    await createOrder(db, order(1_000))
+
+    const theirs = await createOrder(db, {
+      ...order(100),
+      companyId: 2,
+      greenhouseId: 4,
+      supplierId: 4,
+      items: [{ offerId: rows[0]?.id ?? 0, packs: 1 }]
+    })
+
+    expect(theirs.poNumber).toBe(`PO-${year}-0001`)
   })
 })

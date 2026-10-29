@@ -96,7 +96,7 @@ describe('connecting PayPal', () => {
 
     await finish()
 
-    await vi.waitFor(() => expect(fake.charges.map((charge) => charge.customId)).toEqual([`order-${order.id}`]))
+    await vi.waitFor(() => expect(fake.charges.map((charge) => charge.customId)).toEqual([`company-1/${order.poNumber}`]))
   })
 
   it('uses each started connection only once', async () => {
