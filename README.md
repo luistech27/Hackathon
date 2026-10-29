@@ -116,6 +116,26 @@ npm install
 npm test
 ```
 
+### End-to-end tests
+
+A real browser drives the dashboard through the main flows:
+
+- logging in for each role;
+- lowering a tank until the agent orders it, with PayPal paying right away;
+- confirming the delivery, which refills the tank;
+- a greenhouse manager approving an order;
+- an operator reporting a short delivery;
+- downloading the month's CSV.
+
+They run against `server/e2e/server.ts`: the real app on a fresh in-memory database, with a scripted stand-in for Claude and a fake PayPal, so they spend nothing and need no keys.
+
+```bash
+cd server
+npm run e2e
+```
+
+They use the installed Microsoft Edge. Set `PLAYWRIGHT_CHANNEL=chrome` for Chrome, or run `npx playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`.
+
 ## Run the backend
 
 Requires Node.js 24 or newer. Copy `.env.example` to `.env` and set at least `DEVICE_API_KEY`.

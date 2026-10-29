@@ -12,11 +12,13 @@ const PAGES = [
 ]
 
 // The dashboard: a few fixed files read once at startup, so no request can name any other file.
-// They are public; everything they show comes from the API, which checks the session.
+// They are public; everything they show comes from the API, which checks the session. Served from memory,
+// they get a budget of their own: a page load alone would spend a good part of the API's.
+const PAGE_FILES_PER_MINUTE = 600
 export async function pageRoutes(app: FastifyInstance): Promise<void> {
   for (const page of PAGES) {
     const body = await readFile(new URL(page.file, PUBLIC_DIR))
-    app.get(page.url, { config: { public: true } }, async (_request, reply) =>
+    app.get(page.url, { config: { public: true, rateLimit: { max: PAGE_FILES_PER_MINUTE, timeWindow: '1 minute' } } }, async (_request, reply) =>
       reply.type(page.type).header('cache-control', 'no-cache').send(body)
     )
   }

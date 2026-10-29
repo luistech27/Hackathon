@@ -5,6 +5,7 @@ import { sessionUser } from '../auth/session.ts'
 import type { Db } from '../db/client.ts'
 import { AGENT_MODES, type AgentMode } from '../domain/approval.ts'
 import { canManageBudgets } from '../domain/permissions.ts'
+import { SETTING_CHANGES_PER_MINUTE } from './greenhouses.ts'
 import { fail, ok } from './response.ts'
 import { cents } from './schemas.ts'
 
@@ -30,7 +31,8 @@ export function companyRoutes(app: FastifyInstance, db: Db): void {
     return ok({ policy: toPolicy(rows) })
   })
 
-  app.patch('/api/company/policy', async (request, reply) => {
+  const changes = { config: { rateLimit: { max: SETTING_CHANGES_PER_MINUTE, timeWindow: '1 minute' } } }
+  app.patch('/api/company/policy', changes, async (request, reply) => {
     const user = sessionUser(request)
     if (!canManageBudgets(user, user.companyId)) {
       return reply.code(403).send(fail('Only the manager can change the approval rules'))

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
-import { buildApp } from '../app.ts'
+import { buildApp, RATE_LIMIT_PER_MINUTE } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
 
 let db: Db
@@ -40,6 +40,13 @@ describe('dashboard pages', () => {
     expect(csp).toContain("script-src 'self'")
     expect(csp).not.toContain('unsafe-inline')
     expect(csp).toContain("frame-ancestors 'none'")
+  })
+
+  it('gives its own files a budget apart from the API, so loading the page leaves the API its whole budget', async () => {
+    for (let i = 0; i <= RATE_LIMIT_PER_MINUTE; i++) await app.inject({ method: 'GET', url: '/app.js' })
+
+    expect((await app.inject({ method: 'GET', url: '/app.js' })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(200)
   })
 
   it('serves no other file', async () => {

@@ -12,6 +12,11 @@ import { cents, idParams } from './schemas.ts'
 
 const budgetBody = z.object({ monthlyBudgetCents: cents }).strict()
 
+// Each list runs the agent's forecast for every greenhouse; an open dashboard asks for it 3 times a minute.
+const LISTS_PER_MINUTE = 90
+// Every change writes an audit row, even one to the same value.
+export const SETTING_CHANGES_PER_MINUTE = 20
+
 interface Row {
   greenhouse_id: number
   greenhouse_name: string
@@ -62,7 +67,7 @@ const GREENHOUSES_SQL = `
   ORDER BY g.id, s.id`
 
 export function greenhouseRoutes(app: FastifyInstance, db: Db): void {
-  app.get('/api/greenhouses', async (request) => {
+  app.get('/api/greenhouses', { config: { rateLimit: { max: LISTS_PER_MINUTE, timeWindow: '1 minute' } } }, async (request) => {
     const user = sessionUser(request)
     const seesAll = canViewAllGreenhouses(user)
     if (!seesAll && user.greenhouseId === null) return ok({ greenhouses: [] }) // the schema forbids this; fail closed
@@ -74,7 +79,8 @@ export function greenhouseRoutes(app: FastifyInstance, db: Db): void {
     return ok({ greenhouses: groupByGreenhouse(rows, spent, forecasts) })
   })
 
-  app.patch('/api/greenhouses/:id/budget', async (request, reply) => {
+  const changes = { config: { rateLimit: { max: SETTING_CHANGES_PER_MINUTE, timeWindow: '1 minute' } } }
+  app.patch('/api/greenhouses/:id/budget', changes, async (request, reply) => {
     const user = sessionUser(request)
     if (!canManageBudgets(user, user.companyId)) return reply.code(403).send(fail('Only the manager can change budgets'))
     const params = idParams.safeParse(request.params)

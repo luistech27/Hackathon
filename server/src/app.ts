@@ -22,7 +22,8 @@ import type { Db } from './db/client.ts'
 export { LOGIN_ATTEMPTS_PER_MINUTE } from './api/auth.ts'
 
 const BODY_LIMIT_BYTES = 4 * 1024 // a real readings body is well under 1 KB
-export const RATE_LIMIT_PER_MINUTE = 60
+// Per IP. An open dashboard asks about 15 times a minute on its own, and people in one office share an IP.
+export const RATE_LIMIT_PER_MINUTE = 300
 
 // The dashboard's own files and Google Fonts only; no inline scripts, never inside a frame.
 const CSP = {

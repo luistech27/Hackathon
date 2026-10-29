@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
+import { SETTING_CHANGES_PER_MINUTE } from './greenhouses.ts'
 import { openDb, type Db } from '../db/client.ts'
 import { createOrder } from '../orders/orders.ts'
 import { fillSimulatedSupplies } from '../simulation/simulation.ts'
@@ -156,6 +157,14 @@ describe('PATCH /api/greenhouses/:id/budget', () => {
     ['unknown fields', { monthlyBudgetCents: 1, companyId: 2 }]
   ])('answers 400 for %s', async (_name, body) => {
     expect((await setBudget('gerente@agroandes.test', 1, body)).statusCode).toBe(400)
+  })
+
+  it('limits budget changes, since each one writes the audit log', async () => {
+    for (let i = 0; i < SETTING_CHANGES_PER_MINUTE; i++) {
+      await setBudget('gerente@agroandes.test', 1, { monthlyBudgetCents: 150_000 })
+    }
+
+    expect((await setBudget('gerente@agroandes.test', 1, { monthlyBudgetCents: 150_000 })).statusCode).toBe(429)
   })
 
   it('answers 400 for an invalid greenhouse id', async () => {
