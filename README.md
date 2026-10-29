@@ -6,6 +6,18 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) 2026
 
 > Work in progress.
 
+## How the agent works
+
+Every 15 minutes (or when the manager presses run), the server checks each greenhouse:
+
+1. **The code forecasts.** From the sensor readings it works out each supply's level, daily use and days left.
+2. **The code decides whether to ask.** Claude is only called when a supply is below 15% or will run out before the fastest delivery plus a 3-day margin, and no order for it is already on its way.
+3. **Claude chooses.** It gets the supplies that need restocking and the catalog offers that can restock them, and calls a `place_order` tool: which supplier, which offers, how many packs, and one or two sentences of reasoning.
+4. **The code checks every order.** Only supplies that need it, never more than fits in the container, one order per supplier; the order is priced from the catalog and goes through the approval matrix below. Claude sees the verdict (paid on its own, waiting for approval, or rejected) and can adjust.
+5. **Everything is kept.** Each run is stored with Claude's summary (`GET /api/agent/runs`), each order with its reasoning.
+
+It uses `claude-opus-5-5` by default (`AGENT_MODEL` to change it), with Anthropic's server-side fallback in case a request is declined. Without `ANTHROPIC_API_KEY` the agent stays off and everything else works.
+
 ## How spending stays safe
 
 The model proposes, the code decides. Every order goes through a plain, unit-tested approval matrix (`server/src/domain/approval.ts`) before any money moves:
@@ -38,7 +50,8 @@ The amounts are examples the manager can change. On top of the matrix:
 - [x] Approval matrix with a budget per greenhouse: approval inbox, approve and reject, budgets and auto-pay limit set by the manager
 - [x] Supplier catalog managed by purchasing, new suppliers approved by the manager; every order is priced from it and keeps the price of the moment
 - [x] Audit log of orders, approvals, budgets, rules and catalog changes
-- [ ] Claude agent, PayPal integration, dashboard with simulation mode
+- [x] Claude purchasing agent: forecasts each supply, picks offers and places orders through the matrix (`server/src/agent/`)
+- [ ] PayPal integration, dashboard with simulation mode
 
 ## Firmware
 

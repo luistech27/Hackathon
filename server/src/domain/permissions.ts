@@ -71,6 +71,11 @@ export function canApproveSuppliers(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }
 
+// The agent spends money on its own (within the matrix), so only a manager starts it by hand.
+export function canRunAgent(actor: Actor, companyId: number): boolean {
+  return sameCompany(actor, companyId) && actor.role === 'manager'
+}
+
 export function canViewAudit(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }

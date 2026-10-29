@@ -25,6 +25,10 @@ services:
         sync: false # same value as firmware/Invernadero/secrets.h
       - key: DEMO_PASSWORD
         sync: false # shared by the four demo users
+      # Render only asks for sync: false values when a Blueprint is first created; on an existing
+      # service, add it by hand under Environment. Without it the agent stays off.
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
 databases:
   - name: invernadero-db

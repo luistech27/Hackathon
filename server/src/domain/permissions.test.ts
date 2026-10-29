@@ -3,6 +3,7 @@ import {
   canApproveOrder,
   canConfirmReceipt,
   canApproveSuppliers,
+  canRunAgent,
   canManageBudgets,
   canManageCatalog,
   canViewAudit,
@@ -133,6 +134,11 @@ describe('separation of duties', () => {
   it('lets only managers approve new suppliers, never purchasing, who creates them', () => {
     expect(everyone.map((actor) => canApproveSuppliers(actor, COMPANY))).toEqual([false, false, false, true])
     expect(canApproveSuppliers(manager, OTHER_COMPANY)).toBe(false)
+  })
+
+  it('lets only managers start the agent by hand', () => {
+    expect(everyone.map((actor) => canRunAgent(actor, COMPANY))).toEqual([false, false, false, true])
+    expect(canRunAgent(manager, OTHER_COMPANY)).toBe(false)
   })
 
   it("shows only managers their company's audit log", () => {

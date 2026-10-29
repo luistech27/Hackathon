@@ -2,6 +2,8 @@ import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
+import type { AgentConfig } from './agent/agent.ts'
+import { agentRoutes } from './api/agent.ts'
 import { authRoutes } from './api/auth.ts'
 import { auditRoutes } from './api/audit.ts'
 import { catalogRoutes } from './api/catalog.ts'
@@ -24,9 +26,10 @@ export interface AppOptions {
   // Proxies in front of the server (Render's, by default one). Each one appends to X-Forwarded-For,
   // so request.ip is read that many entries from the right, where a client cannot write.
   trustedProxyHops?: number
+  agent?: AgentConfig | null // null or missing: no Claude API key, so the agent cannot be run
 }
 
-export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1 }: AppOptions = {}): Promise<FastifyInstance> {
+export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1, agent = null }: AppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: logger && { serializers: { req: requestLog } },
     bodyLimit: BODY_LIMIT_BYTES,
@@ -52,6 +55,7 @@ export async function buildApp(db: Db, { logger = false, trustedProxyHops = 1 }:
   })
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(fail('Not found')))
 
+  agentRoutes(app, db, agent)
   auditRoutes(app, db)
   authRoutes(app, db)
   catalogRoutes(app, db)

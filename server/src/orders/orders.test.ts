@@ -52,6 +52,7 @@ describe('createOrder from the catalog', () => {
         packs: 3,
         packSize: 25_000,
         packPriceCents: 3_200,
+        leadTimeDays: 2,
         lineCents: 9_600
       }
     ])

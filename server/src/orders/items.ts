@@ -20,6 +20,7 @@ export interface OrderItem {
   packs: number
   packSize: number
   packPriceCents: number
+  leadTimeDays: number
   lineCents: number
 }
 
@@ -30,6 +31,7 @@ interface OfferRow {
   unit: string
   pack_size: number
   pack_price_cents: number
+  lead_time_days: number
   min_packs: number
 }
 
@@ -66,7 +68,8 @@ export async function priceItems(
   items: readonly ItemRequest[]
 ): Promise<{ items: OrderItem[]; totalCents: number }> {
   const { rows } = await db.query<OfferRow>(
-    `SELECT o.id, o.product_id, p.name AS product_name, p.unit, o.pack_size, o.pack_price_cents, o.min_packs
+    `SELECT o.id, o.product_id, p.name AS product_name, p.unit, o.pack_size, o.pack_price_cents, o.lead_time_days,
+       o.min_packs
      FROM offers o JOIN products p ON p.id = o.product_id
      WHERE o.id = ANY($1::int[]) AND o.company_id = $2 AND o.supplier_id = $3 AND o.active
      FOR SHARE OF o`,
@@ -86,15 +89,16 @@ export async function priceItems(
 
 export async function saveItems(db: Queryable, orderId: number, items: readonly OrderItem[]): Promise<void> {
   await db.query(
-    `INSERT INTO order_items (order_id, offer_id, product_id, packs, pack_size, pack_price_cents)
-     SELECT $1, * FROM unnest($2::int[], $3::int[], $4::int[], $5::float8[], $6::int[])`,
+    `INSERT INTO order_items (order_id, offer_id, product_id, packs, pack_size, pack_price_cents, lead_time_days)
+     SELECT $1, * FROM unnest($2::int[], $3::int[], $4::int[], $5::float8[], $6::int[], $7::int[])`,
     [
       orderId,
       items.map((item) => item.offerId),
       items.map((item) => item.productId),
       items.map((item) => item.packs),
       items.map((item) => item.packSize),
-      items.map((item) => item.packPriceCents)
+      items.map((item) => item.packPriceCents),
+      items.map((item) => item.leadTimeDays)
     ]
   )
 }
@@ -105,7 +109,7 @@ export async function loadItems(db: Queryable, orderIds: readonly number[]): Pro
   if (orderIds.length === 0) return byOrder
   const { rows } = await db.query<ItemRow>(
     `SELECT oi.order_id, oi.offer_id, oi.product_id, p.name AS product_name, p.unit, oi.packs, oi.pack_size,
-       oi.pack_price_cents
+       oi.pack_price_cents, oi.lead_time_days
      FROM order_items oi JOIN products p ON p.id = oi.product_id
      WHERE oi.order_id = ANY($1::int[]) ORDER BY oi.id`,
     [orderIds]
@@ -123,6 +127,7 @@ function toItem(row: Omit<ItemRow, 'order_id'>): OrderItem {
     packs: row.packs,
     packSize: row.pack_size,
     packPriceCents: row.pack_price_cents,
+    leadTimeDays: row.lead_time_days,
     lineCents: row.packs * row.pack_price_cents
   }
 }

@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
+    // Every test file starts its own in-memory Postgres (PGlite); with many files in parallel,
+    // and coverage on, starting one can take well over the default 10 s.
+    hookTimeout: 60_000,
     coverage: {
       include: ['src/**/*.ts'],
       // index.ts only wires the server together; it is checked by starting it, not by unit tests

@@ -14,6 +14,7 @@ export interface NewOrder {
   items: readonly ItemRequest[] // offers and packs only: the price always comes from the catalog
   reasoning: string // the agent's one-sentence explanation
   requestedBy: number | null // user id; null for the agent
+  refuseIfOnHold?: boolean // the agent's orders: never order again what was recently ordered (see productsOnHold)
 }
 
 export interface Order {
@@ -70,6 +71,8 @@ const ORDER_COLUMNS = `o.id, o.company_id, o.greenhouse_id, o.supplier_id, o.tot
 
 const LIST_LIMIT = 100 // shortcut: no pagination yet; the newest orders come first
 const MAX_REASONING_LENGTH = 500 // the model's text is shown to people: keep it short, and render it as text only
+const DELIVERY_GRACE_DAYS = 3 // an approved order is expected within its delivery time plus this
+const REJECTION_PAUSE_HOURS = 24 // after a rejection, by a person or by the rules, leave the product alone this long
 
 // Runs the approval matrix and saves the order with its verdict, in one transaction with the greenhouse
 // locked: two orders made at the same time cannot both take the last of the budget.
@@ -100,6 +103,12 @@ export async function createOrder(db: Db, order: NewOrder): Promise<CreatedOrder
       throw new Error(`Supplier ${order.supplierId} is not an active, approved supplier of company ${order.companyId}`)
     }
     const { items, totalCents } = await priceItems(tx, order.companyId, order.supplierId, order.items)
+    if (order.refuseIfOnHold) {
+      // Checked here, with the greenhouse locked, so two runs at once can never both order the same thing.
+      const onHold = await productsOnHold(tx, order.greenhouseId)
+      const repeated = items.find((item) => onHold.has(item.productId))
+      if (repeated) throw new Error(`${repeated.productName} was ordered recently`)
+    }
 
     const decision = decideApproval(
       {
@@ -281,6 +290,22 @@ export async function spentThisMonthByGreenhouse(db: Queryable, companyId: numbe
     [companyId]
   )
   return new Map(rows.map((row) => [row.greenhouse_id, Number(row.cents)]))
+}
+
+// Products of a greenhouse not to order again yet: an order for them is waiting for approval, was approved
+// and is not due yet (counted from the approval, with the delivery time promised then), or was rejected
+// in the last day.
+export async function productsOnHold(db: Queryable, greenhouseId: number): Promise<Set<number>> {
+  const { rows } = await db.query<{ product_id: number }>(
+    `SELECT DISTINCT oi.product_id FROM order_items oi JOIN orders o ON o.id = oi.order_id
+     WHERE o.greenhouse_id = $1 AND (
+       o.status = 'pending_approval'
+       OR (o.status = 'approved'
+         AND COALESCE(o.decided_at, o.created_at) > now() - (oi.lead_time_days + $2) * interval '1 day')
+       OR (o.status = 'rejected' AND COALESCE(o.decided_at, o.created_at) > now() - $3 * interval '1 hour'))`,
+    [greenhouseId, DELIVERY_GRACE_DAYS, REJECTION_PAUSE_HOURS]
+  )
+  return new Set(rows.map((row) => row.product_id))
 }
 
 async function stillAvailable(db: Queryable, order: Order): Promise<boolean> {

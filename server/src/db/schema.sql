@@ -177,6 +177,25 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS audit_log_company_time ON audit_log (company_id, at DESC);
 
+-- Every time the agent asked Claude about a greenhouse: what came of it and what Claude said.
+-- Runs where the code found nothing to restock never call Claude and are not stored.
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  greenhouse_id INTEGER NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('ordered', 'no_order', 'failed')),
+  summary TEXT NOT NULL CHECK (char_length(summary) <= 2000),
+  order_ids INTEGER[] NOT NULL DEFAULT '{}',
+  model TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (company_id, greenhouse_id) REFERENCES greenhouses (company_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_runs_greenhouse_time ON agent_runs (greenhouse_id, started_at DESC);
+
 -- What an order buys, at the price of the moment it was made: later catalog changes never touch it.
 CREATE TABLE IF NOT EXISTS order_items (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -188,3 +207,6 @@ CREATE TABLE IF NOT EXISTS order_items (
   pack_price_cents INTEGER NOT NULL CHECK (pack_price_cents > 0),
   UNIQUE (order_id, offer_id)
 );
+
+-- The delivery time promised when the order was made, so later catalog edits cannot change it.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS lead_time_days INTEGER NOT NULL DEFAULT 0 CHECK (lead_time_days >= 0);
