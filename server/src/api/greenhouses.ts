@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { greenhouseSnapshot, type SupplySnapshot } from '../agent/snapshot.ts'
 import { auditedUpdate } from '../audit/audit.ts'
 import { sessionUser } from '../auth/session.ts'
 import type { Db } from '../db/client.ts'
 import { canManageBudgets, canViewAllGreenhouses } from '../domain/permissions.ts'
+import { reorderLevel } from '../domain/restock.ts'
 import { spentThisMonthByGreenhouse } from '../orders/orders.ts'
 import { fail, ok } from './response.ts'
 import { cents, idParams } from './schemas.ts'
@@ -16,6 +18,7 @@ interface Row {
   monthly_budget_cents: number
   supply_id: number | null
   supply_name: string | null
+  simulated: boolean | null
   unit: string | null
   capacity: number | null
   level: number | null
@@ -29,6 +32,13 @@ interface SupplyView {
   capacity: number | null
   level: number | null // latest reading; null until the first one arrives
   readAt: Date | null
+  simulated: boolean // no device: the server writes its readings (see server/src/simulation)
+  // The agent's forecast, from code (see agent/snapshot.ts):
+  dailyConsumption: number
+  daysLeft: number | null // null: no recent readings, or not being used
+  hasOpenOrder: boolean
+  needsRestock: boolean
+  reorderLevel: number | null // below it the code asks Claude to restock
 }
 
 interface GreenhouseView {
@@ -42,7 +52,7 @@ interface GreenhouseView {
 // Each greenhouse with the latest level of every supply, limited to what the user may see.
 const GREENHOUSES_SQL = `
   SELECT g.id AS greenhouse_id, g.name AS greenhouse_name, g.monthly_budget_cents,
-         s.id AS supply_id, s.name AS supply_name, s.unit, s.capacity, r.level, r.taken_at
+         s.id AS supply_id, s.name AS supply_name, s.device_id IS NULL AND s.sim_daily_use IS NOT NULL AS simulated, s.unit, s.capacity, r.level, r.taken_at
   FROM greenhouses g
   LEFT JOIN supplies s ON s.greenhouse_id = g.id
   LEFT JOIN LATERAL (
@@ -58,7 +68,10 @@ export function greenhouseRoutes(app: FastifyInstance, db: Db): void {
     if (!seesAll && user.greenhouseId === null) return ok({ greenhouses: [] }) // the schema forbids this; fail closed
     const { rows } = await db.query<Row>(GREENHOUSES_SQL, [user.companyId, seesAll ? null : user.greenhouseId])
     const spent = await spentThisMonthByGreenhouse(db, user.companyId)
-    return ok({ greenhouses: groupByGreenhouse(rows, spent) })
+    const greenhouseIds = [...new Set(rows.map((row) => row.greenhouse_id))]
+    const snapshots = await Promise.all(greenhouseIds.map((id) => greenhouseSnapshot(db, user.companyId, id, spent)))
+    const forecasts = new Map(snapshots.flatMap((snapshot) => snapshot?.supplies ?? []).map((s) => [s.supplyId, s]))
+    return ok({ greenhouses: groupByGreenhouse(rows, spent, forecasts) })
   })
 
   app.patch('/api/greenhouses/:id/budget', async (request, reply) => {
@@ -90,7 +103,11 @@ export function greenhouseRoutes(app: FastifyInstance, db: Db): void {
   })
 }
 
-function groupByGreenhouse(rows: Row[], spent: Map<number, number>): GreenhouseView[] {
+function groupByGreenhouse(
+  rows: Row[],
+  spent: Map<number, number>,
+  forecasts: Map<number, SupplySnapshot>
+): GreenhouseView[] {
   const byId = new Map<number, GreenhouseView>()
   for (const row of rows) {
     const greenhouse = byId.get(row.greenhouse_id) ?? {
@@ -108,8 +125,27 @@ function groupByGreenhouse(rows: Row[], spent: Map<number, number>): GreenhouseV
       unit: row.unit,
       capacity: row.capacity,
       level: row.level,
-      readAt: row.taken_at
+      readAt: row.taken_at,
+      simulated: row.simulated === true,
+      ...forecastOf(forecasts.get(row.supply_id))
     })
   }
   return [...byId.values()]
+}
+
+// Supplies without a product have no forecast: nothing could be ordered for them.
+function forecastOf(snapshot: SupplySnapshot | undefined) {
+  if (!snapshot) return { dailyConsumption: 0, daysLeft: null, hasOpenOrder: false, needsRestock: false, reorderLevel: null }
+  const leadTimes = snapshot.offers.map((offer) => offer.leadTimeDays)
+  return {
+    dailyConsumption: snapshot.dailyConsumption,
+    daysLeft: snapshot.daysLeft,
+    hasOpenOrder: snapshot.hasOpenOrder,
+    needsRestock: snapshot.needsRestock,
+    reorderLevel: reorderLevel({
+      capacity: snapshot.capacity,
+      dailyConsumption: snapshot.dailyConsumption,
+      fastestLeadTimeDays: leadTimes.length > 0 ? Math.min(...leadTimes) : null
+    })
+  }
 }

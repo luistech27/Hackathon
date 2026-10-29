@@ -66,11 +66,13 @@ interface OfferRow {
 }
 
 // Everything the agent may know about one greenhouse, computed by code: levels, forecasts, open orders
-// and the catalog. Null when the greenhouse is not of that company.
+// and the catalog. Null when the greenhouse is not of that company. Pass what the company spent this month
+// when it is already known (the dashboard asks for every greenhouse at once).
 export async function greenhouseSnapshot(
   db: Queryable,
   companyId: number,
-  greenhouseId: number
+  greenhouseId: number,
+  spentThisMonth?: Map<number, number>
 ): Promise<GreenhouseSnapshot | null> {
   const { rows } = await db.query<{
     name: string
@@ -99,7 +101,7 @@ export async function greenhouseSnapshot(
     levelHistory(db, supplyIds),
     productsOnHold(db, greenhouseId),
     activeOffers(db, companyId, productIds),
-    spentThisMonthByGreenhouse(db, companyId)
+    spentThisMonth ?? spentThisMonthByGreenhouse(db, companyId)
   ])
 
   return {

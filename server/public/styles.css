@@ -13,6 +13,7 @@
   --leaf-tint: #e0efe5;
   --pollen-tint: #f8edd2;
   --blight-tint: #f6e3e5;
+  --pollen-ink: #6b4e0a;
   --line: #c4d8d1;
 
   --display: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
@@ -140,7 +141,7 @@ textarea {
   background: var(--blight-tint);
 }
 
-.orders .quiet:hover {
+.dashboard .quiet:hover {
   background: var(--glass);
 }
 
@@ -156,7 +157,12 @@ button:disabled {
 }
 
 /* Messages */
+/* Stays in view while scrolling: the buttons that show messages are far down the page. */
 .flash {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 10;
+  box-shadow: 0 12px 30px -18px rgb(16 54 42 / 0.6);
   margin: 1rem auto 0;
   max-width: 68rem;
   width: calc(100% - 2rem);

@@ -20,7 +20,12 @@ describe('dashboard pages', () => {
   it.each([
     ['/', 'text/html'],
     ['/app.js', 'text/javascript'],
-    ['/styles.css', 'text/css']
+    ['/ui.js', 'text/javascript'],
+    ['/orders.js', 'text/javascript'],
+    ['/greenhouses.js', 'text/javascript'],
+    ['/agent.js', 'text/javascript'],
+    ['/styles.css', 'text/css'],
+    ['/greenhouses.css', 'text/css']
   ])('serves %s without a session', async (url, type) => {
     const res = await app.inject({ method: 'GET', url })
 

@@ -12,6 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&display=swap"
     />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/greenhouses.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
@@ -41,6 +42,36 @@
         <h2 id="paypal-title">Paying suppliers</h2>
         <p id="paypal-text"></p>
         <button type="button" class="primary" id="paypal-connect" hidden></button>
+      </section>
+
+      <section aria-labelledby="greenhouses-title">
+        <div class="section-head">
+          <h2 id="greenhouses-title">Greenhouses</h2>
+          <p class="muted">The agent orders a supply when it drops below its dashed line.</p>
+        </div>
+        <div id="simulation" class="simulation" hidden>
+          <p>
+            Greenhouses without an ESP32 run on simulated sensors that use stock all the time. Drag a slider to
+            set a level, or skip ahead to let days of use pass.
+          </p>
+          <div class="actions">
+            <button type="button" class="quiet" id="skip-1">Skip 1 day</button>
+            <button type="button" class="quiet" id="skip-3">Skip 3 days</button>
+            <button type="button" class="danger" id="restart">Restart demo</button>
+          </div>
+        </div>
+        <ol id="greenhouses" class="greenhouses"></ol>
+      </section>
+
+      <section aria-labelledby="agent-title">
+        <div class="section-head">
+          <h2 id="agent-title">What the agent decided</h2>
+          <button type="button" class="primary" id="agent-run" hidden>Run the agent now</button>
+        </div>
+        <ol id="runs" class="runs"></ol>
+        <p id="runs-empty" class="empty" hidden>
+          Claude has not been asked yet. The agent asks only when a supply drops below its line.
+        </p>
       </section>
 
       <section aria-labelledby="orders-title">

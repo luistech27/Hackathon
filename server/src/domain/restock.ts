@@ -40,6 +40,21 @@ export function needsRestock(facts: RestockFacts): boolean {
   return shouldReorder(daysLeft, facts.fastestLeadTimeDays, SAFETY_MARGIN_DAYS)
 }
 
+// The level below which the code asks Claude to restock, which the dashboard draws as a line: enough for the
+// fastest delivery plus the margin, and never below the low level. Null when no offer sells the product.
+export function reorderLevel({
+  capacity,
+  dailyConsumption,
+  fastestLeadTimeDays
+}: {
+  capacity: number
+  dailyConsumption: number
+  fastestLeadTimeDays: number | null
+}): number | null {
+  if (fastestLeadTimeDays === null) return null
+  return Math.max(capacity * LOW_LEVEL_SHARE, dailyConsumption * (fastestLeadTimeDays + SAFETY_MARGIN_DAYS))
+}
+
 // Most packs an order may bring: enough to fill the container, one pack spilling over at most,
 // and never less than the supplier's minimum.
 export function maxPacks({

@@ -102,6 +102,9 @@ const placeOrderInput = z
 // shortcut: one server instance, so an in-memory set is enough to keep two runs off the same greenhouse.
 const running = new Set<number>()
 
+// Restarting the demo waits for runs in progress: one would order from levels the restart just replaced.
+export const agentIsRunning = (): boolean => running.size > 0
+
 // Asks Claude what to buy for one greenhouse. The code decides beforehand whether there is anything to ask
 // about, and afterwards whether each order Claude places is allowed; Claude only chooses among valid options.
 export async function runAgent(db: Db, config: AgentConfig, companyId: number, greenhouseId: number): Promise<AgentRun> {

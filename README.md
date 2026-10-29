@@ -63,6 +63,19 @@ An order becomes a purchase order when it is approved, by the rules or by a pers
 
 Each delivery is confirmed once and recorded in the audit log, with what was ordered and what arrived.
 
+## Simulated sensors
+
+Greenhouse 1 gets its levels from the real ESP32. Greenhouses 2 and 3 have no hardware, so the server simulates their sensors: each supply uses stock at its own daily rate, with a reading every 5 minutes, and the agent treats them exactly like real ones. The dashboard draws every supply as a tank with a dashed line where the code asks Claude to restock.
+
+Logged in as the manager you can:
+
+- drag a tank's slider to set its level,
+- skip 1 or 3 days ahead to let days of use pass,
+- run the agent now and see what it ordered and why,
+- restart the demo: orders, payments, agent runs and the audit log are deleted, and budgets, rules and stock go back to how they started. Only the demo company can be restarted, and the PayPal connection stays.
+
+Confirming a delivery to a simulated greenhouse refills its tank. The server never writes readings for the real ESP32.
+
 ## Status
 
 - [x] Decision logic: consumption forecast, supplier choice, budget rules (`server/src/domain/`)
@@ -78,7 +91,7 @@ Each delivery is confirmed once and recorded in the audit log, with what was ord
 - [x] PayPal payments: the manager connects PayPal once, approved orders are paid with the saved account (`server/src/payments/`)
 - [x] Purchase orders numbered on approval, and deliveries confirmed by the greenhouse (`server/src/orders/`)
 - [x] Dashboard, first part: login, PayPal connection, orders with their payment and delivery, approve, reject and confirm deliveries (`server/public/`)
-- [ ] Dashboard: levels, budgets and simulation mode
+- [x] Dashboard: levels, days left and budget per greenhouse, what the agent decided, and simulated sensors for greenhouses without hardware (`server/src/simulation/`)
 
 ## Firmware
 

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.ts'
 import { openDb, type Db } from '../db/client.ts'
 import { createOrder } from '../orders/orders.ts'
+import { fillSimulatedSupplies } from '../simulation/simulation.ts'
 import { addDollarOffers, dollarItems, loginAs, resetDemo } from '../testing.ts'
 
 let db: Db
@@ -60,6 +61,18 @@ describe('GET /api/greenhouses', () => {
       expect(res.json().data.greenhouses.map((g: { id: number }) => g.id)).toEqual([1, 2, 3])
     }
   )
+
+  it('forecasts each supply as the agent does, and says which sensors are simulated', async () => {
+    await fillSimulatedSupplies(db)
+
+    const { greenhouses } = (await listAs('gerente@agroandes.test')).json().data
+
+    const npk = greenhouses[1].supplies[0] // greenhouse 2: 2.5 kg a day, fastest delivery 2 days
+    expect(npk).toMatchObject({ id: 3, simulated: true, needsRestock: false, hasOpenOrder: false, reorderLevel: 12_500 })
+    expect(npk.dailyConsumption).toBeCloseTo(2_500, -1)
+    expect(npk.daysLeft).toBeGreaterThan(5)
+    expect(greenhouses[0].supplies[0]).toMatchObject({ id: 1, simulated: false, needsRestock: true }) // 800 g left
+  })
 
   it('asks to log in first', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/greenhouses' })

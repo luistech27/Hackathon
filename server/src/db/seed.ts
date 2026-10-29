@@ -16,11 +16,16 @@ const DEVICE_SUPPLIES = [
   { deviceSupplyId: 'water', name: 'Agua de riego', unit: 'L', capacity: 1_000 }
 ]
 
+// dailyUse: what the simulation uses a day, in the supply's unit.
 const SIMULATED_SUPPLIES = [
-  { name: 'Fertilizante NPK 15-15-15', unit: 'g', capacity: 50_000 },
-  { name: 'Nitrato de calcio', unit: 'g', capacity: 25_000 },
-  { name: 'Agua de riego', unit: 'L', capacity: 1_000 }
+  { name: 'Fertilizante NPK 15-15-15', unit: 'g', capacity: 50_000, dailyUse: 2_500 },
+  { name: 'Nitrato de calcio', unit: 'g', capacity: 25_000, dailyUse: 1_000 },
+  { name: 'Agua de riego', unit: 'L', capacity: 1_000, dailyUse: 80 }
 ]
+
+// What restarting the demo puts back.
+const DEFAULT_AUTO_PAY_LIMIT_CENTS = 10_000
+const DEFAULT_AGENT_MODE = 'auto'
 
 // One per role. Operator and greenhouse manager work in greenhouse 1, the one with the real ESP32.
 const DEMO_USERS = [
@@ -72,7 +77,43 @@ export async function seedDemo(db: Db, { deviceKey, demoPassword }: DemoSecrets)
     const demo = await findDemo(tx)
     await upsertDemoUsers(tx, demo, passwordHash)
     await upsertDemoCatalog(tx, demo.company_id)
+    await upsertSimulatedRates(tx, demo.company_id)
   })
+}
+
+// The demo company is the one with the demo ESP32: the only one whose activity may be wiped.
+export async function isDemoCompany(db: Queryable, companyId: number): Promise<boolean> {
+  const { rows } = await db.query(
+    'SELECT 1 FROM devices d JOIN greenhouses g ON g.id = d.greenhouse_id WHERE d.name = $1 AND g.company_id = $2',
+    [DEMO_DEVICE_NAME, companyId]
+  )
+  return rows.length > 0
+}
+
+// Deletes the demo's orders with their items and payments, and the audit log. Run it with the company's
+// greenhouses locked, like any order does. Two things stay: agent runs, which the daily limit on Claude
+// counts, and purchase order numbers, which PayPal already holds for the payments made.
+export async function clearDemoActivity(tx: Queryable, companyId: number): Promise<void> {
+  await tx.query('DELETE FROM payments p USING orders o WHERE p.order_id = o.id AND o.company_id = $1', [companyId])
+  await tx.query('DELETE FROM order_items i USING orders o WHERE i.order_id = o.id AND o.company_id = $1', [companyId])
+  for (const table of ['orders', 'audit_log']) {
+    await tx.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId])
+  }
+}
+
+// Budgets and approval rules as the seed made them.
+export async function restoreDemoSettings(tx: Queryable, companyId: number): Promise<void> {
+  await tx.query(
+    `UPDATE greenhouses g SET monthly_budget_cents = d.budget_cents
+     FROM unnest($2::text[], $3::int[]) AS d(name, budget_cents)
+     WHERE g.company_id = $1 AND g.name = d.name`,
+    [companyId, GREENHOUSES.map((g) => g.name), GREENHOUSES.map((g) => g.budgetCents)]
+  )
+  await tx.query('UPDATE companies SET auto_pay_limit_cents = $2, agent_mode = $3 WHERE id = $1', [
+    companyId,
+    DEFAULT_AUTO_PAY_LIMIT_CENTS,
+    DEFAULT_AGENT_MODE
+  ])
 }
 
 interface DemoRefs {
@@ -111,6 +152,17 @@ async function upsertDemoUsers(tx: Queryable, demo: DemoRefs, passwordHash: stri
       ]
     )
   }
+}
+
+// Supplies without a device that have no rate yet, as in databases seeded before the simulation existed.
+async function upsertSimulatedRates(tx: Queryable, companyId: number): Promise<void> {
+  await tx.query(
+    `UPDATE supplies s SET sim_daily_use = d.daily_use
+     FROM greenhouses g, unnest($2::text[], $3::float8[]) AS d(name, daily_use)
+     WHERE g.id = s.greenhouse_id AND g.company_id = $1 AND s.device_id IS NULL AND s.sim_daily_use IS NULL
+       AND s.name = d.name`,
+    [companyId, SIMULATED_SUPPLIES.map((s) => s.name), SIMULATED_SUPPLIES.map((s) => s.dailyUse)]
+  )
 }
 
 // Products are added when missing and linked to the supplies. Suppliers and offers only go in while the
@@ -181,12 +233,10 @@ async function insertDemo(tx: Queryable, deviceKeyHash: string): Promise<void> {
   await insertRealDevice(tx, realGreenhouseId, deviceKeyHash)
   for (const greenhouseId of simulatedGreenhouseIds) {
     for (const supply of SIMULATED_SUPPLIES) {
-      await tx.query('INSERT INTO supplies (greenhouse_id, name, unit, capacity) VALUES ($1, $2, $3, $4)', [
-        greenhouseId,
-        supply.name,
-        supply.unit,
-        supply.capacity
-      ])
+      await tx.query(
+        'INSERT INTO supplies (greenhouse_id, name, unit, capacity, sim_daily_use) VALUES ($1, $2, $3, $4, $5)',
+        [greenhouseId, supply.name, supply.unit, supply.capacity, supply.dailyUse]
+      )
     }
   }
 }

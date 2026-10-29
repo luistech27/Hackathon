@@ -1,6 +1,7 @@
 import { recordAudit } from '../audit/audit.ts'
 import type { Db } from '../db/client.ts'
 import { canConfirmReceipt, canViewGreenhouse, type Actor } from '../domain/permissions.ts'
+import { refillSimulated } from '../simulation/simulation.ts'
 import { deliveredInFull, loadItems, type OrderItem } from './items.ts'
 import { ORDER_COLUMNS, toOrder, type Order, type OrderRow } from './orders.ts'
 
@@ -55,6 +56,8 @@ export async function receiveOrder(db: Db, actor: Actor, orderId: number, receip
     )
     const arrived = new Map(receipt.items.map((item) => [item.offerId, item.receivedPacks]))
     const lines = ordered.map((item) => ({ ...item, receivedPacks: arrived.get(item.offerId) ?? 0 }))
+    const poured = lines.map((line) => ({ productId: line.productId, amount: line.receivedPacks * line.packSize }))
+    await refillSimulated(tx, order.greenhouseId, poured)
     await recordAudit(tx, {
       companyId: order.companyId,
       userId: actor.id,

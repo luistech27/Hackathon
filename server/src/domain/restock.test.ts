@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { currentLevel, maxPacks, needsRestock, type RestockFacts } from './restock.ts'
+import { currentLevel, maxPacks, needsRestock, reorderLevel, type RestockFacts } from './restock.ts'
 
 describe('currentLevel', () => {
   const NOW = Date.UTC(2026, 10, 1, 12)
@@ -79,5 +79,28 @@ describe('maxPacks', () => {
   it('never goes below the supplier minimum, even for a full container', () => {
     expect(maxPacks({ capacity: 1_000, level: 1_000, packSize: 1_000, minPacks: 1 })).toBe(1)
     expect(maxPacks({ capacity: 1_000, level: 1_100, packSize: 100, minPacks: 1 })).toBe(1)
+  })
+})
+
+describe('reorderLevel', () => {
+  const supply = { capacity: 50_000, dailyConsumption: 2_500, fastestLeadTimeDays: 2 }
+
+  it('is enough for the fastest delivery plus the safety margin', () => {
+    expect(reorderLevel(supply)).toBe(12_500) // (2 + 3 days) × 2.5 kg
+  })
+
+  it('never goes below the low level, 15% of the container', () => {
+    expect(reorderLevel({ ...supply, dailyConsumption: 100 })).toBe(7_500)
+  })
+
+  it('is unknown when no offer sells the product', () => {
+    expect(reorderLevel({ ...supply, fastestLeadTimeDays: null })).toBeNull()
+  })
+
+  it('is where needsRestock changes its answer', () => {
+    const facts = { ...supply, hasOpenOrder: false }
+
+    expect(needsRestock({ ...facts, level: 12_600 })).toBe(false)
+    expect(needsRestock({ ...facts, level: 12_400 })).toBe(true)
   })
 })

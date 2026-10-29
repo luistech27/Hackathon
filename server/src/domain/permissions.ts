@@ -81,6 +81,11 @@ export function canManagePayments(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }
 
+// Moving the simulated sensors and restarting the demo change what everyone sees: the manager's.
+export function canRunSimulation(actor: Actor, companyId: number): boolean {
+  return sameCompany(actor, companyId) && actor.role === 'manager'
+}
+
 export function canViewAudit(actor: Actor, companyId: number): boolean {
   return sameCompany(actor, companyId) && actor.role === 'manager'
 }

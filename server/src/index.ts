@@ -8,12 +8,14 @@ import { openDb } from './db/client.ts'
 import { seedDemo } from './db/seed.ts'
 import { startPaymentSchedule } from './payments/payments.ts'
 import { createPayPal } from './paypal/client.ts'
+import { fillSimulatedSupplies, startSimulation, tickSimulation } from './simulation/simulation.ts'
 
 const MIN_DEMO_PASSWORD_LENGTH = 10
 const DEFAULT_AGENT_INTERVAL_MINUTES = 15
 const MAX_AGENT_INTERVAL_MINUTES = 24 * 60
 const CLAUDE_TIMEOUT_MS = 90_000 // per request; the agent also stops starting turns after 5 minutes
 const PAYMENT_INTERVAL_SECONDS = 30 // how often waiting payments are tried
+const SIMULATION_INTERVAL_MINUTES = 5 // how often simulated sensors write a reading
 const PAYPAL_SANDBOX = 'https://api-m.sandbox.paypal.com'
 const PAYPAL_BASES = new Set([PAYPAL_SANDBOX, 'https://api-m.paypal.com'])
 const port = Number(process.env.PORT ?? 3000)
@@ -53,6 +55,7 @@ const paypal = payPalSetup()
 
 const db = await openDb({ url: process.env.DATABASE_URL, dataDir: '.data' })
 await seedDemo(db, { deviceKey, demoPassword })
+await fillSimulatedSupplies(db) // greenhouses without an ESP32 start with a history, not empty
 
 const app = await buildApp(db, { logger: true, trustedProxyHops, agent, paypal })
 await app.listen({ port, host: '0.0.0.0' })
@@ -62,12 +65,15 @@ if (!paypal) app.log.warn('PAYPAL_CLIENT_ID or PAYPAL_CLIENT_SECRET is not set: 
 const stopAgent =
   agent && agentIntervalMinutes > 0 ? startAgentSchedule(db, agent, agentIntervalMinutes, app.log) : () => {}
 const stopPayments = paypal ? startPaymentSchedule(db, paypal.client, PAYMENT_INTERVAL_SECONDS, app.log) : () => {}
+await tickSimulation(db, app.log) // the simulated sensors catch up on the time the server was down
+const stopSimulation = startSimulation(db, SIMULATION_INTERVAL_MINUTES, app.log)
 
 // Close cleanly so the local PGlite files are not left half-written.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {
     stopAgent()
     stopPayments()
+    stopSimulation()
     await app.close()
     await db.close()
     process.exit(0)

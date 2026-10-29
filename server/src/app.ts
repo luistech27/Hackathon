@@ -15,6 +15,7 @@ import { pageRoutes } from './api/pages.ts'
 import { paymentRoutes, type PayPalSetup } from './api/payments.ts'
 import { readingsRoutes } from './api/readings.ts'
 import { fail } from './api/response.ts'
+import { simulationRoutes } from './api/simulation.ts'
 import { requireSessions } from './auth/session.ts'
 import type { Db } from './db/client.ts'
 
@@ -87,6 +88,7 @@ export async function buildApp(
   await pageRoutes(app)
   paymentRoutes(app, db, paypal)
   readingsRoutes(app, db)
+  simulationRoutes(app, db)
   return app
 }
 

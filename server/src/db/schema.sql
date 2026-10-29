@@ -331,3 +331,8 @@ CALL add_constraint_once('orders', 'orders_received_when_approved', 'CHECK (rece
 CALL add_constraint_once('orders', 'orders_received_by_whom', 'CHECK ((received_at IS NULL) = (received_by IS NULL))');
 CALL add_constraint_once('orders', 'orders_received_by_company',
   'FOREIGN KEY (company_id, received_by) REFERENCES users (company_id, id)');
+
+-- How much a simulated supply uses a day, in its unit: the simulation writes its readings at this rate.
+-- Only supplies without a device are simulated; a real sensor's readings are never written by the server.
+ALTER TABLE supplies ADD COLUMN IF NOT EXISTS sim_daily_use DOUBLE PRECISION CHECK (sim_daily_use >= 0);
+CALL add_constraint_once('supplies', 'supplies_simulated_without_device', 'CHECK (device_id IS NULL OR sim_daily_use IS NULL)');

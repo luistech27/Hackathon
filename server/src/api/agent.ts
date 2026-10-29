@@ -42,7 +42,8 @@ export function agentRoutes(app: FastifyInstance, db: Db, agent: AgentConfig | n
     return ok({ runs })
   })
 
-  // What the agent did and why, scoped like the greenhouses themselves.
+  // What the agent did and why, scoped like the greenhouses themselves. Runs from before the demo was last
+  // restarted are kept, since the daily limit on Claude counts them, but no longer shown.
   app.get('/api/agent/runs', async (request) => {
     const user = sessionUser(request)
     const seesAll = canViewAllGreenhouses(user)
@@ -52,6 +53,8 @@ export function agentRoutes(app: FastifyInstance, db: Db, agent: AgentConfig | n
          r.input_tokens, r.output_tokens, r.started_at, r.finished_at
        FROM agent_runs r JOIN greenhouses g ON g.id = r.greenhouse_id
        WHERE r.company_id = $1 AND ($2::int IS NULL OR r.greenhouse_id = $2)
+         AND r.started_at > COALESCE(
+           (SELECT max(a.at) FROM audit_log a WHERE a.company_id = $1 AND a.action = 'demo_restarted'), '-infinity')
        ORDER BY r.started_at DESC, r.id DESC LIMIT ${LIST_LIMIT}`,
       [user.companyId, seesAll ? null : user.greenhouseId]
     )
