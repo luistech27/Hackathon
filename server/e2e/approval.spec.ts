@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
-import { logIn, postReading, restartDemo, USERS } from './helpers.ts'
+import { logIn, restartDemo, setSlider, USERS } from './helpers.ts'
 
-// Greenhouse 1 has the real ESP32: its scale reports 4 kg of the 50 kg NPK container. With the agent in
-// approval mode, the scripted Claude's order (2 bags, $64) waits for the greenhouse manager.
+// Greenhouse 1, the one with a greenhouse manager and an operator, runs on simulated sensors as in the
+// hosted demo. Its NPK tank (supply 1, 50 kg) is set to 4 kg; with the agent in approval mode, the scripted
+// Claude's order (2 bags, $64) waits for the greenhouse manager.
 test.describe.configure({ mode: 'serial' })
 
 let page: Page
@@ -10,13 +11,9 @@ let page: Page
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage()
   await restartDemo(page)
-  await postReading(page, 'fertilizer', 4_000)
 })
 
 test.afterAll(async () => {
-  // The ESP32's readings outlive a demo restart: leave the container full for the other specs.
-  await postReading(page, 'fertilizer', 50_000)
-  await postReading(page, 'fertilizer', 50_000)
   await restartDemo(page)
   await page.close()
 })
@@ -35,7 +32,9 @@ test('the manager turns on approval mode from the dashboard', async () => {
 })
 
 test('in approval mode the order the agent places waits for a person', async () => {
-  await page.reload()
+  await setSlider(page.locator('[data-supply="1"]').getByRole('slider'), 4_000)
+  await expect(page.locator('[data-supply="1"]')).toHaveAttribute('data-state', 'reorder')
+
   await page.getByRole('button', { name: 'Run the agent now' }).click()
 
   await expect(page.getByText('Claude looked at 1 greenhouse and placed 1 order.')).toBeVisible()

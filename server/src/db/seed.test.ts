@@ -133,4 +133,43 @@ describe('seedDemo', () => {
       { device_supply_id: 'water', unit: 'L' }
     ])
   })
+
+  describe('with the ESP32 not installed (DEMO_ESP32=absent)', () => {
+    const secrets = { deviceKey: 'second-key-second-key-second', demoPassword: 'third-password' }
+    const greenhouse1 = async () =>
+      (await db.query<{ name: string; device_supply_id: string | null; sim_daily_use: number | null }>(
+        'SELECT name, device_supply_id, sim_daily_use FROM supplies WHERE greenhouse_id = 1 ORDER BY id'
+      )).rows
+    const greenhouse1Readings = async () =>
+      (await db.query('SELECT 1 FROM readings r JOIN supplies s ON s.id = r.supply_id WHERE s.greenhouse_id = 1')).rows
+
+    it('simulates greenhouse 1 like the others, at the same daily rates', async () => {
+      await seedDemo(db, secrets, { esp32Installed: false })
+
+      expect(await greenhouse1()).toEqual([
+        { name: 'Fertilizante NPK 15-15-15', device_supply_id: null, sim_daily_use: 2_500 },
+        { name: 'Agua de riego', device_supply_id: null, sim_daily_use: 80 }
+      ])
+    })
+
+    it('wires greenhouse 1 back to the device once it is installed, without the simulated history', async () => {
+      await db.query('INSERT INTO readings (supply_id, level) SELECT id, 1000 FROM supplies WHERE greenhouse_id = 1')
+
+      await seedDemo(db, secrets)
+
+      expect(await greenhouse1()).toEqual([
+        { name: 'Fertilizante NPK 15-15-15', device_supply_id: 'fertilizer', sim_daily_use: null },
+        { name: 'Agua de riego', device_supply_id: 'water', sim_daily_use: null }
+      ])
+      expect(await greenhouse1Readings()).toEqual([])
+    })
+
+    it("keeps a wired device's own readings on every later start", async () => {
+      await db.query('INSERT INTO readings (supply_id, level) SELECT id, 1000 FROM supplies WHERE device_id IS NOT NULL')
+
+      await seedDemo(db, secrets)
+
+      expect(await greenhouse1Readings()).toHaveLength(2)
+    })
+  })
 })

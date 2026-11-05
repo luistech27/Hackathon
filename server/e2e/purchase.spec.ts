@@ -11,7 +11,7 @@ let page: Page
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage()
   await restartDemo(page)
-  // Greenhouse 1's real sensor readings survive a restart: the agent must find nothing to buy there.
+  // Only greenhouse 2 may need anything, so the agent's answer below is about it alone.
   await expect(page.locator('[data-supply="1"]')).not.toHaveAttribute('data-state', 'reorder')
 })
 

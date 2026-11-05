@@ -37,6 +37,10 @@ services:
       - key: PAYPAL_API_BASE
         value: https://api-m.sandbox.paypal.com # Sandbox: no real money moves
       # PayPal sends the manager back to RENDER_EXTERNAL_URL, which Render sets on its own.
+      # Greenhouse 1 runs on simulated sensors until the ESP32 is installed; then set it to installed.
+      # On the existing service, add it by hand under Environment too.
+      - key: DEMO_ESP32
+        value: absent
 
 databases:
   - name: invernadero-db

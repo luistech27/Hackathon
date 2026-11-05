@@ -1,6 +1,6 @@
 # Autonomous Greenhouse
 
-An ESP32 greenhouse that restocks itself. An AI agent (Claude) watches fertilizer and water levels, predicts when they will run out, picks a supplier and pays with PayPal (Sandbox), always inside the budget the owner sets.
+A greenhouse that restocks itself. An AI agent (Claude) watches fertilizer and water levels, predicts when they will run out, picks a supplier and pays with PayPal (Sandbox), always inside the budget the owner sets. The levels come from an ESP32 with a scale and a water sensor; the hosted demo simulates them, so anyone can try it.
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/) 2026.
 
@@ -24,13 +24,11 @@ Log in as the manager.
 1. **Make a supply run low.** Invernadero 2 runs on simulated sensors. Drag the slider under its *Fertilizante NPK* tank down to about 10%. The tank turns yellow: it is below its dashed line, where the code asks Claude to restock.
 2. **Run the agent.** Press **Run the agent now** and wait about 15 seconds. Claude gets the forecast and the suppliers' offers and places an order; the code prices it from the catalog and runs it through the approval rules. Under $100 it is paid at once with PayPal: the order shows its purchase order number and PayPal's order id, and **What the agent decided** shows Claude's reasoning. A bigger order waits in **Waiting for you** for your approval instead.
 3. **Receive it.** In **Waiting for you**, press **Confirm delivery**. Lower a number if something did not arrive, and the order is marked as a short delivery. The tank refills with what arrived.
-4. **Ask for approval.** Under **Approval rules**, press **Change rules** and turn on **Approval mode**. Drag the *Agua de riego* tank of Invernadero 3 down and run the agent: the order now waits in **Waiting for you**. Approve it and PayPal pays it.
-5. **Hit the budget.** Under Invernadero 3, press **Change budget** and set it to 10. Drag its NPK tank down and run the agent again: nothing is bought, because even the cheapest order would go over the budget.
+4. **Hand it to the people in the greenhouse.** Under **Approval rules**, press **Change rules** and turn on **Approval mode**. Drag the *Agua de riego* tank of Invernadero 1 down and run the agent: the order now waits for Invernadero 1's greenhouse manager. Log in as `encargado@agroandes.test` and approve it from **Waiting for you**; PayPal pays it. Then log in as `operador@agroandes.test`, who sees only Invernadero 1 and no money controls, and confirm the delivery.
+5. **Hit the budget.** Log in as the manager again. Under Invernadero 3, press **Change budget** and set it to 10. Drag its NPK tank down and run the agent again: nothing is bought, because even the cheapest order would go over the budget.
 6. **Get the month for the accountant.** Under **Order history**, download the CSV: purchase order, PayPal payment and delivery on one row.
 7. **Let time pass.** **Skip 3 days** makes the simulated greenhouses use three days of stock. The agent also runs on its own every 15 minutes.
 8. **Start over.** **Restart demo** deletes orders, payments and the audit log, and puts budgets, rules and stock back as they started.
-
-Then log in as `operador@agroandes.test` to see the dashboard of someone who works in one greenhouse: only Invernadero 1, its deliveries, and no money controls. Invernadero 1 reads the real ESP32. When the device is offline, its tanks say when they last heard from it.
 
 The demo is open to everyone, so it has limits nobody can get around: Claude is asked at most 40 times a day, and by hand at most 3 times a minute; logins and the API are rate limited. **Restart demo** puts everything back.
 
@@ -97,7 +95,9 @@ For the accountant, **Download purchase orders (CSV)** exports the month's purch
 
 ## Simulated sensors
 
-Greenhouse 1 gets its levels from the real ESP32. Greenhouses 2 and 3 have no hardware, so the server simulates their sensors: each supply uses stock at its own daily rate, with a reading every 5 minutes, and the agent treats them exactly like real ones. The dashboard draws every supply as a tank with a dashed line where the code asks Claude to restock.
+Greenhouse 1 is set up for the ESP32 (see [Firmware](#firmware)); greenhouses 2 and 3 have no hardware. Their sensors are simulated: each supply uses stock at its own daily rate, with a reading every 5 minutes, and the agent treats them exactly like real ones. The dashboard draws every supply as a tank with a dashed line where the code asks Claude to restock.
+
+Until the ESP32 is built, the hosted demo runs greenhouse 1 on simulated sensors too (`DEMO_ESP32=absent`). Setting `DEMO_ESP32=installed` wires its tanks to the device again and drops their simulated history.
 
 Logged in as the manager you can:
 
@@ -182,7 +182,7 @@ Open http://localhost:3000 for the dashboard. Without `DATABASE_URL` the server 
 `render.yaml` describes the server and a private Postgres database.
 
 1. In the Render Dashboard choose **New > Blueprint** and pick this repository.
-2. When asked, enter `DEVICE_API_KEY` (the same value as the ESP32's `secrets.h`), `DEMO_PASSWORD`, and optionally `ANTHROPIC_API_KEY`, `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
+2. When asked, enter `DEVICE_API_KEY` (the same value as the ESP32's `secrets.h`), `DEMO_PASSWORD`, and optionally `ANTHROPIC_API_KEY`, `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`. `DEMO_ESP32` starts as `absent`; set it to `installed` once the ESP32 posts.
 3. Apply. Every push to `main` redeploys the server.
 
 Then point the ESP32 at it: set `SERVER_URL` in `secrets.h` to the service's `https://….onrender.com` address and upload the sketch again.

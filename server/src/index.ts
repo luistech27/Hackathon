@@ -40,6 +40,12 @@ if (!Number.isInteger(agentIntervalMinutes) || agentIntervalMinutes < 0 || agent
   throw new Error(`AGENT_INTERVAL_MINUTES must be whole minutes from 0 (timer off) to ${MAX_AGENT_INTERVAL_MINUTES}`)
 }
 
+// Whether the demo's ESP32 is installed: `absent` runs greenhouse 1 on simulated sensors until it is.
+const demoEsp32 = process.env.DEMO_ESP32 || 'installed'
+if (demoEsp32 !== 'installed' && demoEsp32 !== 'absent') {
+  throw new Error('DEMO_ESP32 must be installed (the default) or absent')
+}
+
 // Render wipes local files on every deploy, so PGlite there would silently lose all data.
 if (process.env.RENDER && !process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL must be set on Render')
@@ -54,7 +60,7 @@ const agent: AgentConfig | null = process.env.ANTHROPIC_API_KEY
 const paypal = payPalSetup()
 
 const db = await openDb({ url: process.env.DATABASE_URL, dataDir: '.data' })
-await seedDemo(db, { deviceKey, demoPassword })
+await seedDemo(db, { deviceKey, demoPassword }, { esp32Installed: demoEsp32 === 'installed' })
 await fillSimulatedSupplies(db) // greenhouses without an ESP32 start with a history, not empty
 
 const app = await buildApp(db, { logger: true, trustedProxyHops, agent, paypal })

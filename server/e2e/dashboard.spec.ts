@@ -18,7 +18,7 @@ test('shows the manager every greenhouse, PayPal and the demo controls', async (
   await expect(page.getByText('Approved orders are paid from pagos@agroandes.test')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Skip 1 day' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Run the agent now' })).toBeVisible()
-  await expect(page.getByRole('slider')).toHaveCount(6) // the simulated tanks only
+  await expect(page.getByRole('slider')).toHaveCount(8) // every tank: the hosted demo has no ESP32 yet
 })
 
 test('shows the operator only their greenhouse, with no demo or money controls', async ({ page }) => {

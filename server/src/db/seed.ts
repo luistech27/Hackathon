@@ -67,7 +67,13 @@ export interface DemoSecrets {
 // Demo company for judges and local runs: three greenhouses, the first one with the real ESP32.
 // The company is created once. The device key and the demo password are refreshed on every
 // start, so changing DEVICE_API_KEY or DEMO_PASSWORD takes effect on the next deploy.
-export async function seedDemo(db: Db, { deviceKey, demoPassword }: DemoSecrets): Promise<void> {
+// esp32Installed: false (DEMO_ESP32=absent) runs greenhouse 1 on simulated sensors like the others, until the
+// real ESP32 is there; true wires its supplies back to the device.
+export async function seedDemo(
+  db: Db,
+  { deviceKey, demoPassword }: DemoSecrets,
+  { esp32Installed = true }: { esp32Installed?: boolean } = {}
+): Promise<void> {
   const passwordHash = await hashPassword(demoPassword)
   await db.transaction(async (tx) => {
     await tx.query('SELECT pg_advisory_xact_lock($1)', [SEED_LOCK_ID])
@@ -78,7 +84,34 @@ export async function seedDemo(db: Db, { deviceKey, demoPassword }: DemoSecrets)
     await upsertDemoUsers(tx, demo, passwordHash)
     await upsertDemoCatalog(tx, demo.company_id)
     await upsertSimulatedRates(tx, demo.company_id)
+    if (esp32Installed) await wireDemoDevice(tx)
+    else await simulateDemoDevice(tx)
   })
+}
+
+// The supplies the demo ESP32 measures become simulated, at the rates of the same products elsewhere.
+async function simulateDemoDevice(tx: Queryable): Promise<void> {
+  await tx.query(
+    `UPDATE supplies s SET device_id = NULL, device_supply_id = NULL, sim_daily_use = d.daily_use
+     FROM devices dv, unnest($2::text[], $3::float8[]) AS d(name, daily_use)
+     WHERE dv.name = $1 AND s.device_id = dv.id AND s.name = d.name`,
+    [DEMO_DEVICE_NAME, SIMULATED_SUPPLIES.map((s) => s.name), SIMULATED_SUPPLIES.map((s) => s.dailyUse)]
+  )
+}
+
+// Wires the device's greenhouse supplies back to it, when they were simulated, and drops their simulated
+// readings: they say nothing about the real containers. A no-op when they are already wired.
+async function wireDemoDevice(tx: Queryable): Promise<void> {
+  await tx.query(
+    `WITH wired AS (
+       UPDATE supplies s SET device_id = dv.id, device_supply_id = d.device_supply_id, sim_daily_use = NULL
+       FROM devices dv, unnest($2::text[], $3::text[]) AS d(name, device_supply_id)
+       WHERE dv.name = $1 AND s.greenhouse_id = dv.greenhouse_id AND s.device_id IS NULL AND s.name = d.name
+       RETURNING s.id
+     )
+     DELETE FROM readings WHERE supply_id IN (SELECT id FROM wired)`,
+    [DEMO_DEVICE_NAME, DEVICE_SUPPLIES.map((s) => s.name), DEVICE_SUPPLIES.map((s) => s.deviceSupplyId)]
+  )
 }
 
 // The demo company is the one with the demo ESP32: the only one whose activity may be wiped.

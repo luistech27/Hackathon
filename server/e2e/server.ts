@@ -1,4 +1,5 @@
-// The server the end-to-end tests drive: the real app on a fresh in-memory database with the demo seeded,
+// The server the end-to-end tests drive: the real app on a fresh in-memory database with the demo seeded as
+// the hosted demo runs it (no ESP32 yet: every greenhouse on simulated sensors),
 // a scripted Claude and a fake PayPal that pays everything, so no test spends money or calls a real service.
 // node e2e/server.ts   (Playwright starts it; see playwright.config.ts)
 import { buildApp } from '../src/app.ts'
@@ -11,7 +12,7 @@ import { scriptedClaude } from './claude.ts'
 const port = Number(process.env.PORT ?? 3201)
 
 const db = await openDb()
-await seedDemo(db, { deviceKey: TEST_DEVICE_KEY, demoPassword: TEST_PASSWORD })
+await seedDemo(db, { deviceKey: TEST_DEVICE_KEY, demoPassword: TEST_PASSWORD }, { esp32Installed: false })
 await fillSimulatedSupplies(db)
 await connectPayPal(db)
 
